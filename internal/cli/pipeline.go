@@ -16,12 +16,14 @@ import (
 )
 
 var (
-	pipelineStatus  string
-	pipelineLimit   int
-	pipelineGroup   int
-	pipelineAfter   string
-	pipelineTmux    bool
-	pipelineOutFile string
+	pipelineStatus   string
+	pipelineLimit    int
+	pipelineGroup    int
+	pipelineAfter    string
+	pipelineTmux     bool
+	pipelineOutFile  string
+	pipelineDryRun   bool
+	pipelineParallel bool
 )
 
 var pipelineCmd = &cobra.Command{
@@ -110,6 +112,27 @@ var plPortStatusCmd = &cobra.Command{
 	RunE:  runPlPortStatus,
 }
 
+var plExecCmd = &cobra.Command{
+	Use:   "exec <id>",
+	Short: "파이프라인 실행",
+	Long: `파이프라인을 실제로 실행합니다.
+
+각 포트의 명령을 순차/병렬로 실행하고 상태를 추적합니다.
+
+--dry-run: 실제 실행 없이 시뮬레이션
+--sequential: 병렬 실행 비활성화 (순차 실행)`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPlExec,
+}
+
+var plResetCmd = &cobra.Command{
+	Use:   "reset <id>",
+	Short: "파이프라인 상태 초기화",
+	Long:  `파이프라인과 모든 포트의 상태를 pending으로 초기화합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPlReset,
+}
+
 func init() {
 	rootCmd.AddCommand(pipelineCmd)
 	pipelineCmd.AddCommand(plCreateCmd)
@@ -122,6 +145,8 @@ func init() {
 	pipelineCmd.AddCommand(plNextCmd)
 	pipelineCmd.AddCommand(plRunCmd)
 	pipelineCmd.AddCommand(plPortStatusCmd)
+	pipelineCmd.AddCommand(plExecCmd)
+	pipelineCmd.AddCommand(plResetCmd)
 
 	plListCmd.Flags().StringVar(&pipelineStatus, "status", "", "상태 필터")
 	plListCmd.Flags().IntVar(&pipelineLimit, "limit", 20, "결과 수 제한")
@@ -131,6 +156,9 @@ func init() {
 
 	plRunCmd.Flags().BoolVar(&pipelineTmux, "tmux", false, "tmux 병렬 실행 스크립트")
 	plRunCmd.Flags().StringVarP(&pipelineOutFile, "out", "o", "", "출력 파일 경로")
+
+	plExecCmd.Flags().BoolVar(&pipelineDryRun, "dry-run", false, "실제 실행 없이 시뮬레이션")
+	plExecCmd.Flags().BoolVar(&pipelineParallel, "sequential", false, "순차 실행 (병렬 비활성화)")
 }
 
 func getPipelineService() (*pipeline.Service, func(), error) {
@@ -170,6 +198,119 @@ func runPlCreate(cmd *cobra.Command, args []string) error {
 		if name != id {
 			fmt.Printf("  이름: %s\n", name)
 		}
+	}
+
+	return nil
+}
+
+func runPlExec(cmd *cobra.Command, args []string) error {
+	pipelineID := args[0]
+
+	svc, cleanup, err := getPipelineService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// 파이프라인 존재 확인
+	pl, err := svc.Get(pipelineID)
+	if err != nil {
+		return err
+	}
+
+	// 프로젝트 루트 찾기
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		projectRoot = cwd
+	}
+
+	// Executor 생성
+	executor := pipeline.NewExecutor(svc, pipelineID, projectRoot)
+	executor.SetDryRun(pipelineDryRun)
+	executor.SetVerbose(verbose || !jsonOut)
+	executor.SetParallel(!pipelineParallel) // --sequential 플래그는 반대
+
+	// 콜백 설정
+	executor.SetCallback(func(result pipeline.ExecutionResult) {
+		if jsonOut {
+			json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+				"event":    "port_complete",
+				"port":     result.PortID,
+				"success":  result.Success,
+				"duration": result.Duration.Seconds(),
+			})
+		}
+	})
+
+	if !jsonOut {
+		fmt.Printf("🚀 파이프라인 실행: %s\n", pl.Name)
+		if pipelineDryRun {
+			fmt.Println("   (드라이 런 모드)")
+		}
+		fmt.Println()
+	}
+
+	// 실행
+	if err := executor.Execute(); err != nil {
+		if jsonOut {
+			json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+				"status": "failed",
+				"error":  err.Error(),
+			})
+		} else {
+			fmt.Printf("\n❌ 실패: %v\n", err)
+		}
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"status":   "complete",
+			"pipeline": pipelineID,
+		})
+	}
+
+	return nil
+}
+
+func runPlReset(cmd *cobra.Command, args []string) error {
+	pipelineID := args[0]
+
+	svc, cleanup, err := getPipelineService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// 파이프라인 존재 확인
+	if _, err := svc.Get(pipelineID); err != nil {
+		return err
+	}
+
+	// 파이프라인 상태 초기화
+	if err := svc.UpdateStatus(pipelineID, pipeline.StatusPending); err != nil {
+		return err
+	}
+
+	// 모든 포트 상태 초기화
+	ports, err := svc.GetPorts(pipelineID)
+	if err != nil {
+		return err
+	}
+
+	for _, p := range ports {
+		svc.UpdatePortStatus(pipelineID, p.PortID, pipeline.StatusPending)
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":   "reset",
+			"pipeline": pipelineID,
+			"ports":    len(ports),
+		})
+	} else {
+		fmt.Printf("✅ 파이프라인 초기화: %s (%d 포트)\n", pipelineID, len(ports))
 	}
 
 	return nil
