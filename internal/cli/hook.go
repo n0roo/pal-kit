@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/google/uuid"
+	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/lock"
 	"github.com/n0roo/pal-kit/internal/session"
@@ -127,6 +128,17 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 	projectDir := os.Getenv("CLAUDE_PROJECT_DIR")
 	if projectDir != "" && verbose {
 		fmt.Printf("📁 Project: %s\n", projectDir)
+	}
+
+	// CLAUDE.md에 컨텍스트 주입
+	ctxSvc := context.NewService(database)
+	cwd, _ := os.Getwd()
+	claudeMD := context.FindClaudeMD(cwd)
+	if claudeMD != "" {
+		ctxSvc.InjectToFile(claudeMD)
+		if verbose {
+			fmt.Printf("📝 Context injected: %s\n", claudeMD)
+		}
 	}
 
 	return nil
