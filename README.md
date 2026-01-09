@@ -12,11 +12,11 @@ PAL Kit은 Claude Code와 함께 사용하여 복잡한 작업을 체계적으�
 |------|------|
 | **세션 관리** | 에이전트 세션 추적, 계층 구조 (builder → sub) |
 | **포트 관리** | 작업 단위 정의, 상태 추적, 배타적 소유권 |
-| **파이프라인** | 포트 의존성 관리, 실행 그룹화 |
+| **파이프라인** | 포트 의존성 관리, 실행 그룹화, 자동 실행 |
 | **Lock** | 리소스 충돌 방지, 동시성 제어 |
 | **Rules 연동** | `.claude/rules/` 동적 생성으로 조건부 컨텍스트 |
+| **Hook** | Claude Code 이벤트 연동, 자동 상태 관리 |
 | **에스컬레이션** | 상위 에이전트로 이슈 전달 |
-| **컨텍스트 관리** | CLAUDE.md 동적 업데이트 |
 
 ## 설치
 
@@ -44,10 +44,11 @@ pal pipeline create feature-order "Order Feature"
 pal pl add feature-order port-001 --group 0
 pal pl add feature-order port-002 --group 1 --after port-001
 
+# 실행 계획 확인
+pal pl plan feature-order
+
 # 작업 시작
-pal port activate port-001
-pal lock acquire domain
-pal port status port-001 running
+pal hook port-start port-001
 
 # 상태 확인
 pal status
@@ -99,9 +100,34 @@ pal port rules                               # 활성 규칙 목록
 pal pipeline create <ID> [NAME]
 pal pl add <PIPELINE> <PORT> [--group N] [--after PORT]
 pal pl list [--status STATUS]
-pal pl show <ID>           # 트리뷰
+pal pl show <ID>              # 트리뷰
 pal pl status <ID> [STATUS]
 pal pl delete <ID>
+
+# 실행 관리
+pal pl plan <ID>              # 실행 계획 조회
+pal pl next <ID>              # 다음 실행 가능 포트
+pal pl run <ID>               # 실행 스크립트 생성
+pal pl run <ID> --tmux        # tmux 병렬 스크립트
+pal pl run <ID> -o FILE       # 파일로 저장
+pal pl port-status <PL> <PORT> <STATUS>  # 포트 상태 변경
+```
+
+### Hook
+
+```bash
+# Claude Code 이벤트 Hook
+pal hook session-start [--port ID]  # 세션 시작 (+포트)
+pal hook session-end                # 세션 종료
+pal hook pre-tool-use               # 도구 사용 전
+pal hook post-tool-use              # 도구 사용 후
+pal hook pre-compact                # 컴팩션 전
+pal hook stop                       # 중지
+
+# 포트 작업 Hook
+pal hook port-start <ID>    # 포트 시작 (rules + running)
+pal hook port-end <ID>      # 포트 완료 (rules 제거 + complete)
+pal hook sync               # rules ↔ running 동기화
 ```
 
 ### Lock
@@ -138,20 +164,6 @@ pal ctx for-port <ID>     # 포트 기반 컨텍스트 생성
 pal status   # 대시보드 (세션, 포트, 파이프라인, Lock, 에스컬레이션)
 ```
 
-### 템플릿
-
-```bash
-pal template list
-pal template create <TYPE> --id <ID> [--title TITLE]
-pal template show <TYPE>
-```
-
-### 사용량
-
-```bash
-pal usage [--session ID]
-```
-
 ## 디렉토리 구조
 
 ```
@@ -159,9 +171,10 @@ your-project/
 ├── CLAUDE.md              # 프로젝트 컨텍스트 (동적 섹션 포함)
 ├── .claude/
 │   ├── pal.db            # SQLite 데이터베이스
+│   ├── settings.json     # Claude Code Hook 설정
 │   ├── agents/           # 에이전트 프롬프트
 │   ├── rules/            # 조건부 규칙 (동적 생성)
-│   ├── hooks/            # Claude Code Hook 스크립트
+│   ├── hooks/            # Hook 스크립트 디렉토리
 │   └── state/            # 상태 디렉토리
 └── ports/                 # 포트 명세 문서
     ├── port-001.md
@@ -170,7 +183,7 @@ your-project/
 
 ## 워크플로우 예시
 
-### 기본 워크플로우
+### 기본 워크플로우 (Hook 사용)
 
 ```bash
 # 1. 초기화
@@ -179,18 +192,14 @@ pal init
 # 2. 포트 정의
 pal port create entity-order --title "Order Entity 구현"
 
-# 3. 작업 시작
-pal port activate entity-order
-pal lock acquire domain
-pal port status entity-order running
+# 3. 작업 시작 (rules 자동 생성)
+pal hook port-start entity-order
 
 # 4. 작업 수행 (Claude Code에서)
 # ...
 
-# 5. 완료
-pal port status entity-order complete
-pal lock release domain
-pal port deactivate entity-order
+# 5. 완료 (rules 자동 제거)
+pal hook port-end entity-order
 ```
 
 ### 파이프라인 워크플로우
@@ -204,10 +213,14 @@ pal pipeline create feature-x
 pal pl add feature-x port-001 --group 0
 pal pl add feature-x port-002 --group 1 --after port-001
 pal pl add feature-x port-003 --group 1 --after port-001
-pal pl add feature-x port-004 --group 2 --after port-002 --after port-003
+pal pl add feature-x port-004 --group 2 --after port-002
 
-# 상태 확인
-pal pl show feature-x
+# 실행 계획 확인
+pal pl plan feature-x
+
+# 실행 스크립트 생성
+pal pl run feature-x -o run.sh
+bash run.sh
 ```
 
 ### 계층적 세션
@@ -225,14 +238,23 @@ pal session start --type sub --parent builder-123 --port port-002 --title "Servi
 pal session tree
 ```
 
-## Hook 연동
+## Hook 설정 (settings.json)
 
-`.claude/hooks/session-start` 예시:
-
-```bash
-#!/bin/bash
-pal hook session-start
-pal ctx inject
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{ "type": "command", "command": "pal hook session-start" }]
+    }],
+    "SessionEnd": [{
+      "hooks": [{ "type": "command", "command": "pal hook session-end" }]
+    }],
+    "PreCompact": [{
+      "matcher": "auto",
+      "hooks": [{ "type": "command", "command": "pal hook pre-compact" }]
+    }]
+  }
+}
 ```
 
 ## 환경 변수

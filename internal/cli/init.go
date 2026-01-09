@@ -65,6 +65,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		filepath.Join(baseDir, "hooks", "session-start"),
 		filepath.Join(baseDir, "hooks", "session-end"),
 		filepath.Join(baseDir, "agents"),
+		filepath.Join(baseDir, "rules"),
 		filepath.Join(baseDir, "state"),
 		filepath.Join(baseDir, "state", "locks"),
 		filepath.Join(baseDir, "state", "ports"),
@@ -123,6 +124,16 @@ func createSettingsFile(path string) error {
           {
             "type": "command",
             "command": "pal hook session-start"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pal hook session-end"
           }
         ]
       }
