@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/pipeline"
 	"github.com/n0roo/pal-kit/internal/port"
@@ -14,10 +16,12 @@ import (
 )
 
 var (
-	pipelineStatus string
-	pipelineLimit  int
-	pipelineGroup  int
-	pipelineAfter  string
+	pipelineStatus  string
+	pipelineLimit   int
+	pipelineGroup   int
+	pipelineAfter   string
+	pipelineTmux    bool
+	pipelineOutFile string
 )
 
 var pipelineCmd = &cobra.Command{
@@ -72,6 +76,40 @@ var plDeleteCmd = &cobra.Command{
 	RunE:  runPlDelete,
 }
 
+var plPlanCmd = &cobra.Command{
+	Use:   "plan <id>",
+	Short: "실행 계획 조회",
+	Long:  `파이프라인의 실행 계획을 조회합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPlPlan,
+}
+
+var plNextCmd = &cobra.Command{
+	Use:   "next <id>",
+	Short: "다음 실행 가능한 포트",
+	Long:  `의존성이 충족되어 바로 실행 가능한 포트 목록을 반환합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPlNext,
+}
+
+var plRunCmd = &cobra.Command{
+	Use:   "run <id>",
+	Short: "실행 스크립트 생성",
+	Long: `파이프라인 실행을 위한 쉘 스크립트를 생성합니다.
+
+--tmux: tmux 병렬 실행 스크립트 생성
+--out: 파일로 저장 (기본: stdout)`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPlRun,
+}
+
+var plPortStatusCmd = &cobra.Command{
+	Use:   "port-status <pipeline-id> <port-id> <status>",
+	Short: "파이프라인 내 포트 상태 변경",
+	Args:  cobra.ExactArgs(3),
+	RunE:  runPlPortStatus,
+}
+
 func init() {
 	rootCmd.AddCommand(pipelineCmd)
 	pipelineCmd.AddCommand(plCreateCmd)
@@ -80,12 +118,19 @@ func init() {
 	pipelineCmd.AddCommand(plShowCmd)
 	pipelineCmd.AddCommand(plStatusCmd)
 	pipelineCmd.AddCommand(plDeleteCmd)
+	pipelineCmd.AddCommand(plPlanCmd)
+	pipelineCmd.AddCommand(plNextCmd)
+	pipelineCmd.AddCommand(plRunCmd)
+	pipelineCmd.AddCommand(plPortStatusCmd)
 
 	plListCmd.Flags().StringVar(&pipelineStatus, "status", "", "상태 필터")
 	plListCmd.Flags().IntVar(&pipelineLimit, "limit", 20, "결과 수 제한")
 
 	plAddCmd.Flags().IntVar(&pipelineGroup, "group", 0, "실행 그룹 (기본: 0)")
 	plAddCmd.Flags().StringVar(&pipelineAfter, "after", "", "의존 포트 ID")
+
+	plRunCmd.Flags().BoolVar(&pipelineTmux, "tmux", false, "tmux 병렬 실행 스크립트")
+	plRunCmd.Flags().StringVarP(&pipelineOutFile, "out", "o", "", "출력 파일 경로")
 }
 
 func getPipelineService() (*pipeline.Service, func(), error) {
@@ -425,6 +470,214 @@ func runPlDelete(cmd *cobra.Command, args []string) error {
 		})
 	} else {
 		fmt.Printf("✓ 파이프라인 삭제: %s\n", pipelineID)
+	}
+
+	return nil
+}
+
+func runPlPlan(cmd *cobra.Command, args []string) error {
+	pipelineID := args[0]
+
+	svc, cleanup, err := getPipelineService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	plan, err := svc.BuildExecutionPlan(pipelineID)
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(plan)
+		return nil
+	}
+
+	fmt.Printf("📋 Execution Plan: %s\n", pipelineID)
+	fmt.Printf("   Total ports: %d\n", plan.TotalPorts)
+	fmt.Println()
+
+	statusEmoji := map[string]string{
+		"pending":  "⏳",
+		"running":  "🔄",
+		"complete": "✅",
+		"failed":   "❌",
+	}
+
+	for _, group := range plan.Groups {
+		parallel := ""
+		if len(group.Ports) > 1 {
+			parallel = " (병렬 가능)"
+		}
+		fmt.Printf("Group %d%s:\n", group.Order, parallel)
+
+		for _, port := range group.Ports {
+			emoji := statusEmoji[port.Status]
+			if emoji == "" {
+				emoji = "⏳"
+			}
+			deps := ""
+			if len(port.Dependencies) > 0 {
+				deps = fmt.Sprintf(" ← %s", strings.Join(port.Dependencies, ", "))
+			}
+			fmt.Printf("  %s %s%s\n", emoji, port.PortID, deps)
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
+func runPlNext(cmd *cobra.Command, args []string) error {
+	pipelineID := args[0]
+
+	svc, cleanup, err := getPipelineService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	nextPorts, err := svc.GetNextPorts(pipelineID)
+	if err != nil {
+		return err
+	}
+
+	runningPorts, _ := svc.GetRunningPorts(pipelineID)
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"ready":   nextPorts,
+			"running": runningPorts,
+		})
+		return nil
+	}
+
+	if len(runningPorts) > 0 {
+		fmt.Printf("🔄 Running: %s\n", strings.Join(runningPorts, ", "))
+	}
+
+	if len(nextPorts) == 0 {
+		isComplete, _ := svc.IsComplete(pipelineID)
+		if isComplete {
+			fmt.Println("✅ 모든 포트 완료")
+		} else if len(runningPorts) > 0 {
+			fmt.Println("⏳ 실행 중인 포트 완료 대기")
+		} else {
+			fmt.Println("❌ 실행 가능한 포트 없음 (의존성 확인)")
+		}
+		return nil
+	}
+
+	fmt.Printf("▶️  Ready: %s\n", strings.Join(nextPorts, ", "))
+	fmt.Println()
+	fmt.Println("실행 명령:")
+	for _, portID := range nextPorts {
+		fmt.Printf("  pal port activate %s && pal pl port-status %s %s running\n",
+			portID, pipelineID, portID)
+	}
+
+	return nil
+}
+
+func runPlRun(cmd *cobra.Command, args []string) error {
+	pipelineID := args[0]
+
+	svc, cleanup, err := getPipelineService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// 프로젝트 루트 찾기
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		projectRoot = cwd
+	}
+
+	var script string
+	if pipelineTmux {
+		script, err = svc.GenerateTmuxScript(pipelineID, projectRoot, "")
+	} else {
+		script, err = svc.GenerateRunScript(pipelineID, projectRoot)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// 출력
+	if pipelineOutFile != "" {
+		outPath := pipelineOutFile
+		if !filepath.IsAbs(outPath) {
+			outPath = filepath.Join(projectRoot, outPath)
+		}
+
+		if err := os.WriteFile(outPath, []byte(script), 0755); err != nil {
+			return fmt.Errorf("파일 저장 실패: %w", err)
+		}
+
+		if !jsonOut {
+			fmt.Printf("✓ 스크립트 생성: %s\n", outPath)
+			fmt.Printf("  실행: bash %s\n", outPath)
+		} else {
+			json.NewEncoder(os.Stdout).Encode(map[string]string{
+				"status": "generated",
+				"file":   outPath,
+			})
+		}
+	} else {
+		fmt.Println(script)
+	}
+
+	return nil
+}
+
+func runPlPortStatus(cmd *cobra.Command, args []string) error {
+	pipelineID := args[0]
+	portID := args[1]
+	newStatus := args[2]
+
+	svc, cleanup, err := getPipelineService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if err := svc.UpdatePortStatus(pipelineID, portID, newStatus); err != nil {
+		return err
+	}
+
+	// 파이프라인 완료 체크
+	isComplete, _ := svc.IsComplete(pipelineID)
+	hasFailed, _ := svc.HasFailure(pipelineID)
+
+	if isComplete && !hasFailed {
+		svc.UpdateStatus(pipelineID, pipeline.StatusComplete)
+	} else if hasFailed {
+		svc.UpdateStatus(pipelineID, pipeline.StatusFailed)
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"status":     "updated",
+			"pipeline":   pipelineID,
+			"port":       portID,
+			"new_status": newStatus,
+		})
+	} else {
+		statusEmoji := map[string]string{
+			"pending":  "⏳",
+			"running":  "🔄",
+			"complete": "✅",
+			"failed":   "❌",
+		}
+		fmt.Printf("%s %s: %s → %s\n", statusEmoji[newStatus], pipelineID, portID, newStatus)
+
+		if isComplete && !hasFailed {
+			fmt.Println("🎉 파이프라인 완료!")
+		}
 	}
 
 	return nil

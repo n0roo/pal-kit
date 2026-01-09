@@ -37,57 +37,77 @@
   - [x] 포트 기반 컨텍스트 생성
 - [x] 통합 상태 대시보드 (`pal status`)
 
----
+### Phase 4: 파이프라인 실행 (v0.2.1)
+- [x] `pal pl plan` - 실행 계획 조회
+- [x] `pal pl next` - 다음 실행 가능 포트
+- [x] `pal pl run` - 실행 스크립트 생성
+- [x] `pal pl run --tmux` - tmux 병렬 스크립트
+- [x] `pal pl port-status` - 파이프라인 내 포트 상태
 
-## 진행 중 🔄
-
-(현재 없음)
+### Phase 5: Hook 고도화 (v0.2.2)
+- [x] `pal hook port-start` - 포트 시작 (rules + running)
+- [x] `pal hook port-end` - 포트 완료 (rules 제거)
+- [x] `pal hook sync` - rules ↔ running 동기화
+- [x] `pal hook session-start --port` - 세션+포트 동시 시작
+- [x] settings.json에 SessionEnd Hook 추가
+- [x] init 시 rules 디렉토리 생성
 
 ---
 
 ## 예정된 기능 📋
 
-### Phase 4: 실행 자동화 (v0.3.0)
-- [ ] `pal pipeline run <id>` - 파이프라인 실행
-- [ ] `pal pipeline wait <id>` - 완료 대기
-- [ ] tmux 연동 (병렬 실행)
-- [ ] Task 연동 (순차 실행)
+### Phase 6: 자동화 강화 (v0.3.0)
+- [ ] `pal pl exec <id>` - 실제 파이프라인 실행 (subprocess)
+- [ ] `pal pl watch <id>` - 파이프라인 모니터링
+- [ ] 포트 타임아웃 설정
+- [ ] 실패 시 자동 재시도
 
-### Phase 5: 고급 기능 (v0.4.0)
-- [ ] 포트 의존성 자동 분석
-- [ ] 포트 명세에서 파일 패턴 자동 추출
-- [ ] Hook 자동 설정
-- [ ] 세션 복구 (`pal session resume`)
+### Phase 7: 에이전트 통합 (v0.4.0)
+- [ ] 에이전트 프롬프트 로딩
+- [ ] 에이전트별 세션 분리
+- [ ] 에이전트 간 메시지 전달
+- [ ] builder 에이전트 자동 실행
 
 ### 개선 사항
 - [ ] `pal port show` 포트 명세 내용 표시
 - [ ] `pal status --pipeline <id>` 파이프라인 중심 뷰
+- [ ] `pal status --watch` 실시간 갱신
 - [ ] JSON 스키마 검증
 - [ ] 설정 파일 (`pal.yaml`) 지원
 - [ ] 테스트 코드 작성
+- [ ] bash/zsh 자동완성
 
 ---
 
 ## 버그 및 기술 부채
 
-- [ ] 외래키 제약 조건 에러 메시지 개선
 - [ ] DB 마이그레이션 롤백 지원
 - [ ] 에러 핸들링 일관성
+- [ ] 로그 레벨 설정
 
 ---
 
 ## 문서
 
 - [x] README.md 업데이트
+- [x] TODO.md 업데이트
 - [ ] 사용 가이드 (USAGE.md)
 - [ ] 아키텍처 문서 (ARCHITECTURE.md)
-- [ ] 예제 프로젝트
+- [ ] 예제 프로젝트 정리
 
 ---
 
 ## 버전 히스토리
 
-### v0.2.0 (현재)
+### v0.2.2 (현재)
+- Hook 고도화 (port-start, port-end, sync)
+- settings.json 개선
+
+### v0.2.1
+- 파이프라인 실행 (plan, next, run)
+- 파이프라인 내 포트 상태 관리
+
+### v0.2.0
 - 파이프라인 관리
 - 세션 계층 (builder/sub)
 - Rules 연동
