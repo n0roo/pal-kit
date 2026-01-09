@@ -7,16 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/port"
+	"github.com/n0roo/pal-kit/internal/rules"
 	"github.com/spf13/cobra"
 )
 
 var (
-	portTitle  string
-	portFile   string
-	portStatus string
-	portLimit  int
+	portTitle    string
+	portFile     string
+	portStatus   string
+	portLimit    int
+	portPatterns []string
 )
 
 var portCmd = &cobra.Command{
@@ -73,6 +76,29 @@ var portSummaryCmd = &cobra.Command{
 	RunE:  runPortSummary,
 }
 
+var portActivateCmd = &cobra.Command{
+	Use:   "activate <id>",
+	Short: "포트 활성화 (rules 파일 생성)",
+	Long: `포트를 활성화하고 .claude/rules/에 조건부 규칙 파일을 생성합니다.
+
+Claude Code가 해당 포트 관련 파일 작업 시 자동으로 규칙을 로드합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPortActivate,
+}
+
+var portDeactivateCmd = &cobra.Command{
+	Use:   "deactivate <id>",
+	Short: "포트 비활성화 (rules 파일 삭제)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPortDeactivate,
+}
+
+var portRulesCmd = &cobra.Command{
+	Use:   "rules",
+	Short: "활성 규칙 목록",
+	RunE:  runPortRules,
+}
+
 func init() {
 	rootCmd.AddCommand(portCmd)
 	portCmd.AddCommand(portCreateCmd)
@@ -81,12 +107,17 @@ func init() {
 	portCmd.AddCommand(portShowCmd)
 	portCmd.AddCommand(portDeleteCmd)
 	portCmd.AddCommand(portSummaryCmd)
+	portCmd.AddCommand(portActivateCmd)
+	portCmd.AddCommand(portDeactivateCmd)
+	portCmd.AddCommand(portRulesCmd)
 
 	portCreateCmd.Flags().StringVar(&portTitle, "title", "", "포트 제목")
 	portCreateCmd.Flags().StringVar(&portFile, "file", "", "포트 문서 경로")
 
 	portListCmd.Flags().StringVar(&portStatus, "status", "", "상태 필터 (pending|running|complete|failed|blocked)")
 	portListCmd.Flags().IntVar(&portLimit, "limit", 20, "결과 수 제한")
+
+	portActivateCmd.Flags().StringArrayVar(&portPatterns, "path", nil, "적용할 파일 패턴 (여러 개 가능)")
 }
 
 func getPortService() (*port.Service, func(), error) {
@@ -388,6 +419,142 @@ func runPortSummary(cmd *cobra.Command, args []string) error {
 		if count > 0 {
 			fmt.Printf("%s %-10s: %d\n", statusEmoji[s], s, count)
 		}
+	}
+
+	return nil
+}
+
+func runPortActivate(cmd *cobra.Command, args []string) error {
+	portID := args[0]
+
+	// 포트 정보 조회
+	svc, cleanup, err := getPortService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	p, err := svc.Get(portID)
+	if err != nil {
+		return err
+	}
+
+	// 프로젝트 루트 찾기
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다 (pal init 실행 필요)")
+	}
+
+	// rules 서비스 생성
+	rulesSvc := rules.NewService(projectRoot)
+
+	// 포트 명세 경로
+	specPath := ""
+	if p.FilePath.Valid {
+		specPath = p.FilePath.String
+	}
+
+	// 제목
+	title := portID
+	if p.Title.Valid {
+		title = p.Title.String
+	}
+
+	// 파일 패턴
+	patterns := portPatterns
+	if len(patterns) == 0 && specPath != "" {
+		patterns = []string{specPath}
+	}
+
+	// 규칙 파일 생성 (포트 명세 포함)
+	if err := rulesSvc.ActivatePortWithSpec(portID, title, specPath, patterns); err != nil {
+		return err
+	}
+
+	// 포트 상태를 running으로 변경
+	if p.Status == "pending" {
+		svc.UpdateStatus(portID, "running")
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":    "activated",
+			"id":        portID,
+			"rule_file": rulesSvc.GetRulePath(portID),
+			"patterns":  patterns,
+		})
+	} else {
+		fmt.Printf("✅ 포트 활성화: %s\n", portID)
+		fmt.Printf("  규칙 파일: %s\n", rulesSvc.GetRulePath(portID))
+		if len(patterns) > 0 {
+			fmt.Printf("  적용 패턴: %v\n", patterns)
+		}
+	}
+
+	return nil
+}
+
+func runPortDeactivate(cmd *cobra.Command, args []string) error {
+	portID := args[0]
+
+	// 프로젝트 루트 찾기
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	// rules 서비스 생성
+	rulesSvc := rules.NewService(projectRoot)
+
+	// 규칙 파일 삭제
+	if err := rulesSvc.DeactivatePort(portID); err != nil {
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"status": "deactivated",
+			"id":     portID,
+		})
+	} else {
+		fmt.Printf("⚪ 포트 비활성화: %s\n", portID)
+	}
+
+	return nil
+}
+
+func runPortRules(cmd *cobra.Command, args []string) error {
+	// 프로젝트 루트 찾기
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	rulesSvc := rules.NewService(projectRoot)
+	rulesList, err := rulesSvc.ListActiveRules()
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"rules": rulesList,
+		})
+		return nil
+	}
+
+	if len(rulesList) == 0 {
+		fmt.Println("활성 규칙이 없습니다.")
+		return nil
+	}
+
+	fmt.Printf("활성 규칙 (%d개)\n", len(rulesList))
+	fmt.Println(strings.Repeat("-", 30))
+	for _, rule := range rulesList {
+		fmt.Printf("📝 %s\n", rule)
 	}
 
 	return nil
