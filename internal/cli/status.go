@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/n0roo/pal-kit/internal/agent"
+	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/escalation"
 	"github.com/n0roo/pal-kit/internal/lock"
@@ -24,22 +27,27 @@ var statusCmd = &cobra.Command{
 	RunE: runStatus,
 }
 
+var statusDetailedFlag bool
+
 func init() {
 	rootCmd.AddCommand(statusCmd)
+	statusCmd.Flags().BoolVarP(&statusDetailedFlag, "detailed", "d", false, "상세 정보 표시 (토큰, 시간)")
 }
 
 // StatusSummary holds all status information
 type StatusSummary struct {
-	Sessions     SessionStatus     `json:"sessions"`
-	Ports        PortStatus        `json:"ports"`
-	Pipelines    PipelineStatus    `json:"pipelines"`
-	Locks        []lock.Lock       `json:"locks"`
-	Escalations  EscalationStatus  `json:"escalations"`
+	Sessions    SessionStatus    `json:"sessions"`
+	Ports       PortStatus       `json:"ports"`
+	Pipelines   PipelineStatus   `json:"pipelines"`
+	Locks       []lock.Lock      `json:"locks"`
+	Escalations EscalationStatus `json:"escalations"`
+	Agents      AgentStatus      `json:"agents"`
+	TotalUsage  UsageSummary     `json:"total_usage"`
 }
 
 type SessionStatus struct {
-	Active int              `json:"active"`
-	Total  int              `json:"total"`
+	Active int               `json:"active"`
+	Total  int               `json:"total"`
 	List   []session.Session `json:"list,omitempty"`
 }
 
@@ -60,6 +68,21 @@ type EscalationStatus struct {
 	Total    int `json:"total"`
 }
 
+type AgentStatus struct {
+	Count int      `json:"count"`
+	Types []string `json:"types,omitempty"`
+}
+
+type UsageSummary struct {
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+	TotalCacheRead    int64   `json:"total_cache_read"`
+	TotalCacheCreate  int64   `json:"total_cache_create"`
+	TotalCostUSD      float64 `json:"total_cost_usd"`
+	TotalSessions     int     `json:"total_sessions"`
+	TotalDuration     string  `json:"total_duration"`
+}
+
 func runStatus(cmd *cobra.Command, args []string) error {
 	database, err := db.Open(GetDBPath())
 	if err != nil {
@@ -74,6 +97,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	lockSvc := lock.NewService(database)
 	escSvc := escalation.NewService(database)
 
+	// 에이전트 서비스
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		projectRoot = cwd
+	}
+	agentSvc := agent.NewService(projectRoot)
+
 	summary := StatusSummary{}
 
 	// 세션 현황
@@ -83,6 +114,32 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		Active: len(activeSessions),
 		Total:  len(allSessions),
 		List:   activeSessions,
+	}
+
+	// 토큰 사용량 집계
+	var totalInput, totalOutput, totalCacheRead, totalCacheCreate int64
+	var totalCost float64
+	var totalDuration time.Duration
+	for _, s := range allSessions {
+		totalInput += s.InputTokens
+		totalOutput += s.OutputTokens
+		totalCacheRead += s.CacheReadTokens
+		totalCacheCreate += s.CacheCreateTokens
+		totalCost += s.CostUSD
+		if s.EndedAt.Valid {
+			totalDuration += s.EndedAt.Time.Sub(s.StartedAt)
+		} else if s.Status == "running" {
+			totalDuration += time.Since(s.StartedAt)
+		}
+	}
+	summary.TotalUsage = UsageSummary{
+		TotalInputTokens:  totalInput,
+		TotalOutputTokens: totalOutput,
+		TotalCacheRead:    totalCacheRead,
+		TotalCacheCreate:  totalCacheCreate,
+		TotalCostUSD:      totalCost,
+		TotalSessions:     len(allSessions),
+		TotalDuration:     formatDuration(totalDuration),
 	}
 
 	// 포트 현황
@@ -112,6 +169,21 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		Open:     escSummary["open"],
 		Resolved: escSummary["resolved"],
 		Total:    escSummary["open"] + escSummary["resolved"] + escSummary["dismissed"],
+	}
+
+	// 에이전트 현황
+	agents, _ := agentSvc.List()
+	agentTypes := make(map[string]bool)
+	for _, a := range agents {
+		agentTypes[a.Type] = true
+	}
+	var types []string
+	for t := range agentTypes {
+		types = append(types, t)
+	}
+	summary.Agents = AgentStatus{
+		Count: len(agents),
+		Types: types,
 	}
 
 	if jsonOut {
@@ -145,10 +217,47 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			if s.PortID.Valid {
 				portInfo = fmt.Sprintf(" [%s]", s.PortID.String)
 			}
-			fmt.Printf("   %s %s%s\n", emoji, title, portInfo)
+
+			// 기본 정보
+			duration := time.Since(s.StartedAt)
+			fmt.Printf("   %s %s%s (%s)\n", emoji, title, portInfo, formatDuration(duration))
+
+			// 상세 모드: 토큰 정보
+			if statusDetailedFlag {
+				fmt.Printf("      ├─ 시작: %s\n", s.StartedAt.Format("2006-01-02 15:04:05"))
+				if s.InputTokens > 0 || s.OutputTokens > 0 {
+					fmt.Printf("      ├─ 토큰: in=%s, out=%s", formatTokens(s.InputTokens), formatTokens(s.OutputTokens))
+					if s.CacheReadTokens > 0 {
+						fmt.Printf(", cache=%s", formatTokens(s.CacheReadTokens))
+					}
+					fmt.Println()
+				}
+				if s.CostUSD > 0 {
+					fmt.Printf("      ├─ 비용: $%.4f\n", s.CostUSD)
+				}
+				if s.CompactCount > 0 {
+					fmt.Printf("      └─ 컴팩션: %d회\n", s.CompactCount)
+				}
+			}
 		}
 	}
 	fmt.Println()
+
+	// 총 사용량 (상세 모드)
+	if statusDetailedFlag && summary.TotalUsage.TotalInputTokens > 0 {
+		fmt.Println("📊 Total Usage:")
+		fmt.Printf("   토큰: in=%s, out=%s\n",
+			formatTokens(summary.TotalUsage.TotalInputTokens),
+			formatTokens(summary.TotalUsage.TotalOutputTokens))
+		if summary.TotalUsage.TotalCacheRead > 0 {
+			fmt.Printf("   캐시: read=%s, create=%s\n",
+				formatTokens(summary.TotalUsage.TotalCacheRead),
+				formatTokens(summary.TotalUsage.TotalCacheCreate))
+		}
+		fmt.Printf("   비용: $%.4f\n", summary.TotalUsage.TotalCostUSD)
+		fmt.Printf("   시간: %s\n", summary.TotalUsage.TotalDuration)
+		fmt.Println()
+	}
 
 	// 포트 섹션
 	fmt.Println("📦 Ports:")
@@ -188,6 +297,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	// 에이전트 섹션
+	if summary.Agents.Count > 0 {
+		fmt.Printf("🤖 Agents: %d 등록됨\n", summary.Agents.Count)
+		if len(summary.Agents.Types) > 0 {
+			fmt.Printf("   타입: %s\n", strings.Join(summary.Agents.Types, ", "))
+		}
+		fmt.Println()
+	}
+
 	// Lock 섹션
 	fmt.Printf("🔒 Locks: %d active\n", len(summary.Locks))
 	if len(summary.Locks) > 0 {
@@ -214,7 +332,34 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	fmt.Println(strings.Repeat("─", 64))
-	fmt.Printf("💡 Tip: pal session tree, pal port list, pal pl show <id>\n")
+	fmt.Printf("💡 Tip: pal status -d (상세), pal session show <id>\n")
 
 	return nil
+}
+
+// formatDuration formats duration in human readable format
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	return fmt.Sprintf("%dd%dh", days, hours)
+}
+
+// formatTokens formats token count with K/M suffix
+func formatTokens(tokens int64) string {
+	if tokens < 1000 {
+		return fmt.Sprintf("%d", tokens)
+	}
+	if tokens < 1000000 {
+		return fmt.Sprintf("%.1fK", float64(tokens)/1000)
+	}
+	return fmt.Sprintf("%.2fM", float64(tokens)/1000000)
 }
