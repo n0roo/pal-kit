@@ -136,6 +136,12 @@ func init() {
 }
 
 func readHookInput() (*HookInput, error) {
+	// stdin이 터미널이면 (파이프가 아니면) 빈 입력 반환
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		return &HookInput{}, nil
+	}
+
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return nil, err

@@ -147,7 +147,15 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("DB 연결 실패: %w", err)
 	}
 
-	return &DB{DB: db, path: path}, nil
+	d := &DB{DB: db, path: path}
+
+	// 스키마 자동 초기화
+	if err := d.Init(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("스키마 초기화 실패: %w", err)
+	}
+
+	return d, nil
 }
 
 // Init initializes the database schema

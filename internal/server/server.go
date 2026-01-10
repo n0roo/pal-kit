@@ -228,7 +228,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.jsonResponse(w, sessions)
+	s.jsonResponse(w, toSessionDTOs(sessions))
 }
 
 // handlePorts returns port list
@@ -247,7 +247,7 @@ func (s *Server) handlePorts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.jsonResponse(w, ports)
+	s.jsonResponse(w, toPortDTOs(ports))
 }
 
 // handlePipelines returns pipeline list
@@ -266,7 +266,7 @@ func (s *Server) handlePipelines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.jsonResponse(w, pipelines)
+	s.jsonResponse(w, toPipelineDTOs(pipelines))
 }
 
 // handleAgents returns agent list
@@ -322,7 +322,7 @@ func (s *Server) handleLocks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.jsonResponse(w, locks)
+	s.jsonResponse(w, toLockDTOs(locks))
 }
 
 // handleEscalations returns escalation list
@@ -341,7 +341,7 @@ func (s *Server) handleEscalations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.jsonResponse(w, escalations)
+	s.jsonResponse(w, toEscalationDTOs(escalations))
 }
 
 // Run starts the server (convenience function)

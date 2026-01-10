@@ -25,12 +25,10 @@ function initTabs() {
 }
 
 function switchTab(tab) {
-    // Update nav buttons
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
     });
     
-    // Update tab content
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.toggle('active', content.id === `tab-${tab}`);
     });
@@ -77,16 +75,14 @@ async function loadStatus() {
     const data = await fetchAPI('status');
     if (!data) return;
     
-    // Update stats
-    setStatValue('sessions-active', data.sessions?.active || 0);
-    setStatValue('ports-total', data.ports?.total || 0);
-    setStatValue('pipelines-running', data.pipelines?.running || 0);
-    setStatValue('docs-total', data.docs?.total || 0);
-    setStatValue('conventions-enabled', data.conventions?.enabled || 0);
-    setStatValue('locks-active', data.locks?.active || 0);
-    setStatValue('escalations-open', data.escalations?.open || 0);
+    setStatValue('sessions-active', data.sessions?.active ?? 0);
+    setStatValue('ports-total', data.ports?.total ?? 0);
+    setStatValue('pipelines-running', data.pipelines?.running ?? 0);
+    setStatValue('docs-total', data.docs?.total ?? 0);
+    setStatValue('conventions-enabled', data.conventions?.enabled ?? 0);
+    setStatValue('locks-active', data.locks?.active ?? 0);
+    setStatValue('escalations-open', data.escalations?.open ?? 0);
     
-    // Update project root
     document.getElementById('project-root').textContent = data.project_root || '';
 }
 
@@ -107,10 +103,10 @@ async function loadSessions() {
     
     tbody.innerHTML = data.map(s => `
         <tr>
-            <td>${statusBadge(s.status)}</td>
-            <td class="text-sm">${s.id}</td>
-            <td>${s.title?.String || '-'}</td>
-            <td>${s.port_id?.String || '-'}</td>
+            <td>${statusBadge(s.status || 'unknown')}</td>
+            <td class="text-sm">${escapeHtml(s.id || '-')}</td>
+            <td>${escapeHtml(getNullableString(s.title))}</td>
+            <td>${escapeHtml(getNullableString(s.port_id))}</td>
             <td class="text-sm muted">${formatDate(s.started_at)}</td>
         </tr>
     `).join('');
@@ -128,10 +124,10 @@ async function loadPorts() {
     
     tbody.innerHTML = data.map(p => `
         <tr>
-            <td>${statusBadge(p.status)}</td>
-            <td class="text-sm">${p.id}</td>
-            <td>${p.title?.String || '-'}</td>
-            <td>${p.pipeline_id?.String || '-'}</td>
+            <td>${statusBadge(p.status || 'unknown')}</td>
+            <td class="text-sm">${escapeHtml(p.id || '-')}</td>
+            <td>${escapeHtml(getNullableString(p.title))}</td>
+            <td>${escapeHtml(getNullableString(p.pipeline_id))}</td>
             <td class="text-sm muted">${formatDate(p.created_at)}</td>
         </tr>
     `).join('');
@@ -149,9 +145,9 @@ async function loadPipelines() {
     
     tbody.innerHTML = data.map(p => `
         <tr>
-            <td>${statusBadge(p.status)}</td>
-            <td class="text-sm">${p.id}</td>
-            <td>${p.name}</td>
+            <td>${statusBadge(p.status || 'unknown')}</td>
+            <td class="text-sm">${escapeHtml(p.id || '-')}</td>
+            <td>${escapeHtml(p.name || '-')}</td>
             <td class="text-sm muted">${formatDate(p.created_at)}</td>
         </tr>
     `).join('');
@@ -169,9 +165,9 @@ async function loadDocs() {
     
     tbody.innerHTML = data.map(d => `
         <tr>
-            <td>${statusBadge(d.status)}</td>
-            <td>${d.relative_path}</td>
-            <td>${d.type}</td>
+            <td>${statusBadge(d.status || 'unknown')}</td>
+            <td>${escapeHtml(d.relative_path || d.path || '-')}</td>
+            <td>${escapeHtml(d.type || '-')}</td>
             <td class="text-sm muted">${formatBytes(d.size)}</td>
             <td class="text-sm muted">${formatDate(d.modified_at)}</td>
         </tr>
@@ -191,11 +187,11 @@ async function loadConventions() {
     tbody.innerHTML = data.map(c => `
         <tr>
             <td>${statusBadge(c.enabled ? 'enabled' : 'disabled')}</td>
-            <td class="text-sm">${c.id}</td>
-            <td>${c.name}</td>
-            <td>${c.type}</td>
-            <td>${c.rules?.length || 0}</td>
-            <td>${c.priority}</td>
+            <td class="text-sm">${escapeHtml(c.id || '-')}</td>
+            <td>${escapeHtml(c.name || '-')}</td>
+            <td>${escapeHtml(c.type || '-')}</td>
+            <td>${Array.isArray(c.rules) ? c.rules.length : 0}</td>
+            <td>${c.priority ?? '-'}</td>
         </tr>
     `).join('');
 }
@@ -213,13 +209,13 @@ async function loadAgents() {
     grid.innerHTML = data.map(a => `
         <div class="agent-card">
             <h3>
-                ${typeEmoji(a.type)} ${a.name}
-                <span class="type-badge">${a.type}</span>
+                ${typeEmoji(a.type)} ${escapeHtml(a.name || a.id || 'Unknown')}
+                <span class="type-badge">${escapeHtml(a.type || 'custom')}</span>
             </h3>
-            <p>${a.description || 'No description'}</p>
-            ${a.tools?.length ? `
+            <p>${escapeHtml(a.description || 'No description')}</p>
+            ${Array.isArray(a.tools) && a.tools.length ? `
                 <div class="agent-tools">
-                    ${a.tools.map(t => `<span class="tool-tag">${t}</span>`).join('')}
+                    ${a.tools.map(t => `<span class="tool-tag">${escapeHtml(t)}</span>`).join('')}
                 </div>
             ` : ''}
         </div>
@@ -227,18 +223,75 @@ async function loadAgents() {
 }
 
 // Helpers
+
+/**
+ * Get value from Go's sql.NullString (or similar nullable types)
+ * Handles: {String: "value", Valid: true} or plain string or null
+ */
+function getNullableString(field) {
+    if (field === null || field === undefined) return '-';
+    if (typeof field === 'string') return field || '-';
+    if (typeof field === 'object') {
+        // Go's sql.NullString format
+        if (field.Valid === true && field.String !== undefined) {
+            return field.String || '-';
+        }
+        // Go's sql.NullInt64, sql.NullTime, etc.
+        if (field.Valid === true && field.Int64 !== undefined) {
+            return String(field.Int64);
+        }
+        if (field.Valid === true && field.Time !== undefined) {
+            return field.Time;
+        }
+    }
+    return '-';
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '-';
+    const str = String(text);
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 function statusBadge(status) {
-    return `<span class="status"><span class="status-dot ${status}"></span>${status}</span>`;
+    const safeStatus = escapeHtml(status || 'unknown');
+    return `<span class="status"><span class="status-dot ${safeStatus}"></span>${safeStatus}</span>`;
 }
 
 function formatDate(dateStr) {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
+    
+    // Handle Go's sql.NullTime
+    if (typeof dateStr === 'object') {
+        if (dateStr.Valid === true && dateStr.Time) {
+            dateStr = dateStr.Time;
+        } else {
+            return '-';
+        }
+    }
+    
+    try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return '-';
+        return date.toLocaleString();
+    } catch {
+        return '-';
+    }
 }
 
 function formatBytes(bytes) {
-    if (!bytes) return '0 B';
+    if (bytes === null || bytes === undefined || bytes === 0) return '0 B';
+    
+    // Handle nullable
+    if (typeof bytes === 'object' && bytes.Valid !== undefined) {
+        bytes = bytes.Valid ? (bytes.Int64 || 0) : 0;
+    }
+    
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -253,7 +306,9 @@ function typeEmoji(type) {
         planner: '📋',
         tester: '🧪',
         docs: '📝',
-        custom: '⚙️'
+        architect: '🏛️',
+        engineer: '⚙️',
+        custom: '🤖'
     };
     return emojis[type] || '🤖';
 }

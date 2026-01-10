@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/spf13/cobra"
 )
 
@@ -45,12 +46,19 @@ func GetDBPath() string {
 		return dbPath
 	}
 	
-	// 기본 경로: .claude/pal.db
+	// 프로젝트 루트에서 .claude/pal.db 찾기
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ".claude/pal.db"
 	}
-	return fmt.Sprintf("%s/.claude/pal.db", cwd)
+	
+	// 프로젝트 루트 찾기 (.claude 디렉토리가 있는 곳)
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot != "" {
+		return filepath.Join(projectRoot, ".claude", "pal.db")
+	}
+	
+	return filepath.Join(cwd, ".claude", "pal.db")
 }
 
 // IsVerbose returns verbose flag
