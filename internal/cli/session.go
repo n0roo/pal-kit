@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/n0roo/pal-kit/internal/db"
@@ -340,7 +341,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("%s 세션: %s\n", emoji, sess.ID)
-	fmt.Println(strings.Repeat("-", 40))
+	fmt.Println(strings.Repeat("-", 50))
 	fmt.Printf("유형: %s\n", sess.SessionType)
 	fmt.Printf("상태: %s\n", sess.Status)
 	if sess.ParentSession.Valid {
@@ -352,32 +353,67 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	if sess.Title.Valid {
 		fmt.Printf("제목: %s\n", sess.Title.String)
 	}
-	fmt.Printf("시작: %s\n", sess.StartedAt.Format("2006-01-02 15:04:05"))
+
+	fmt.Println()
+	fmt.Println("⏱️  시간 정보:")
+	fmt.Printf("  시작: %s\n", sess.StartedAt.Format("2006-01-02 15:04:05"))
 	if sess.EndedAt.Valid {
-		fmt.Printf("종료: %s\n", sess.EndedAt.Time.Format("2006-01-02 15:04:05"))
+		fmt.Printf("  종료: %s\n", sess.EndedAt.Time.Format("2006-01-02 15:04:05"))
+		duration := sess.EndedAt.Time.Sub(sess.StartedAt)
+		fmt.Printf("  체류: %s\n", formatDuration(duration))
+	} else if sess.Status == "running" {
+		duration := time.Since(sess.StartedAt)
+		fmt.Printf("  체류: %s (진행 중)\n", formatDuration(duration))
 	}
+
 	fmt.Println()
-	fmt.Printf("토큰 사용량:\n")
-	fmt.Printf("  입력: %d\n", sess.InputTokens)
-	fmt.Printf("  출력: %d\n", sess.OutputTokens)
-	fmt.Printf("  캐시 읽기: %d\n", sess.CacheReadTokens)
-	fmt.Printf("  캐시 생성: %d\n", sess.CacheCreateTokens)
-	fmt.Printf("  비용: $%.4f\n", sess.CostUSD)
-	fmt.Println()
-	fmt.Printf("컴팩션: %d회\n", sess.CompactCount)
+	fmt.Println("📊 토큰 사용량:")
+	totalTokens := sess.InputTokens + sess.OutputTokens
+	if totalTokens > 0 {
+		fmt.Printf("  입력:      %s\n", formatTokens(sess.InputTokens))
+		fmt.Printf("  출력:      %s\n", formatTokens(sess.OutputTokens))
+		fmt.Printf("  합계:      %s\n", formatTokens(totalTokens))
+		if sess.CacheReadTokens > 0 || sess.CacheCreateTokens > 0 {
+			fmt.Printf("  캐시 읽기: %s\n", formatTokens(sess.CacheReadTokens))
+			fmt.Printf("  캐시 생성: %s\n", formatTokens(sess.CacheCreateTokens))
+		}
+		fmt.Printf("  비용:      $%.4f\n", sess.CostUSD)
+	} else {
+		fmt.Println("  (사용량 없음)")
+	}
+
+	if sess.CompactCount > 0 {
+		fmt.Println()
+		fmt.Printf("📦 컴팩션: %d회\n", sess.CompactCount)
+		if sess.LastCompactAt.Valid {
+			fmt.Printf("  마지막: %s\n", sess.LastCompactAt.Time.Format("2006-01-02 15:04:05"))
+		}
+	}
 
 	// 하위 세션 조회
 	children, _ := svc.GetChildren(sess.ID)
 	if len(children) > 0 {
 		fmt.Println()
-		fmt.Printf("하위 세션: %d개\n", len(children))
+		fmt.Printf("👥 하위 세션: %d개\n", len(children))
 		for _, child := range children {
 			childEmoji := typeEmoji[child.SessionType]
+			if childEmoji == "" {
+				childEmoji = "📍"
+			}
 			title := "-"
 			if child.Title.Valid {
 				title = child.Title.String
 			}
-			fmt.Printf("  %s %s: %s (%s)\n", childEmoji, child.ID, title, child.Status)
+			statusEmoji := map[string]string{
+				"running":  "🔄",
+				"complete": "✅",
+				"failed":   "❌",
+			}
+			sEmoji := statusEmoji[child.Status]
+			if sEmoji == "" {
+				sEmoji = "⏳"
+			}
+			fmt.Printf("  %s %s %s: %s\n", childEmoji, sEmoji, child.ID, title)
 		}
 	}
 
