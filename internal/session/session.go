@@ -34,6 +34,21 @@ type Session struct {
 	CostUSD           float64
 	CompactCount      int
 	LastCompactAt     sql.NullTime
+	// v3 필드
+	ClaudeSessionID   sql.NullString
+	ProjectRoot       sql.NullString
+	ProjectName       sql.NullString
+	TranscriptPath    sql.NullString
+	Cwd               sql.NullString
+}
+
+// SessionEvent represents a session event for history tracking
+type SessionEvent struct {
+	ID        int64
+	SessionID string
+	EventType string
+	EventData string
+	CreatedAt time.Time
 }
 
 // SessionNode represents a session in a tree structure
@@ -57,48 +72,98 @@ func (s *Service) Start(id, portID, title string) error {
 	return s.StartWithOptions(id, portID, title, TypeSingle, "")
 }
 
+// StartOptions contains options for creating a session
+type StartOptions struct {
+	ID              string
+	PortID          string
+	Title           string
+	SessionType     string
+	ParentSession   string
+	ClaudeSessionID string
+	ProjectRoot     string
+	ProjectName     string
+	TranscriptPath  string
+	Cwd             string
+}
+
 // StartWithOptions creates a new session with type and parent
 func (s *Service) StartWithOptions(id, portID, title, sessionType, parentSession string) error {
-	var portIDNull, titleNull, parentNull sql.NullString
+	return s.StartWithFullOptions(StartOptions{
+		ID:            id,
+		PortID:        portID,
+		Title:         title,
+		SessionType:   sessionType,
+		ParentSession: parentSession,
+	})
+}
 
-	if portID != "" {
+// StartWithFullOptions creates a new session with all options
+func (s *Service) StartWithFullOptions(opts StartOptions) error {
+	var portIDNull, titleNull, parentNull sql.NullString
+	var claudeIDNull, projRootNull, projNameNull, transcriptNull, cwdNull sql.NullString
+
+	if opts.PortID != "" {
 		// 포트 존재 여부 확인 (없으면 NULL로 처리)
 		var exists int
-		err := s.db.QueryRow(`SELECT 1 FROM ports WHERE id = ?`, portID).Scan(&exists)
+		err := s.db.QueryRow(`SELECT 1 FROM ports WHERE id = ?`, opts.PortID).Scan(&exists)
 		if err == nil {
-			portIDNull = sql.NullString{String: portID, Valid: true}
+			portIDNull = sql.NullString{String: opts.PortID, Valid: true}
 		}
-		// 포트가 없어도 세션은 생성 (경고만)
 	}
-	if title != "" {
-		titleNull = sql.NullString{String: title, Valid: true}
+	if opts.Title != "" {
+		titleNull = sql.NullString{String: opts.Title, Valid: true}
 	}
-	if parentSession != "" {
-		// 상위 세션 존재 여부 확인
+	if opts.ParentSession != "" {
 		var exists int
-		err := s.db.QueryRow(`SELECT 1 FROM sessions WHERE id = ?`, parentSession).Scan(&exists)
+		err := s.db.QueryRow(`SELECT 1 FROM sessions WHERE id = ?`, opts.ParentSession).Scan(&exists)
 		if err != nil {
-			return fmt.Errorf("상위 세션 '%s'을(를) 찾을 수 없습니다", parentSession)
+			return fmt.Errorf("상위 세션 '%s'을(를) 찾을 수 없습니다", opts.ParentSession)
 		}
-		parentNull = sql.NullString{String: parentSession, Valid: true}
+		parentNull = sql.NullString{String: opts.ParentSession, Valid: true}
 	}
-	if sessionType == "" {
-		sessionType = TypeSingle
+	if opts.SessionType == "" {
+		opts.SessionType = TypeSingle
+	}
+	if opts.ClaudeSessionID != "" {
+		claudeIDNull = sql.NullString{String: opts.ClaudeSessionID, Valid: true}
+	}
+	if opts.ProjectRoot != "" {
+		projRootNull = sql.NullString{String: opts.ProjectRoot, Valid: true}
+	}
+	if opts.ProjectName != "" {
+		projNameNull = sql.NullString{String: opts.ProjectName, Valid: true}
+	}
+	if opts.TranscriptPath != "" {
+		transcriptNull = sql.NullString{String: opts.TranscriptPath, Valid: true}
+	}
+	if opts.Cwd != "" {
+		cwdNull = sql.NullString{String: opts.Cwd, Valid: true}
 	}
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, port_id, title, status, session_type, parent_session)
-		VALUES (?, ?, ?, 'running', ?, ?)
-	`, id, portIDNull, titleNull, sessionType, parentNull)
+		INSERT INTO sessions (id, port_id, title, status, session_type, parent_session,
+			claude_session_id, project_root, project_name, transcript_path, cwd)
+		VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
+	`, opts.ID, portIDNull, titleNull, opts.SessionType, parentNull,
+		claudeIDNull, projRootNull, projNameNull, transcriptNull, cwdNull)
 
 	if err != nil {
 		return fmt.Errorf("세션 생성 실패: %w", err)
 	}
+
+	// 세션 시작 이벤트 로깅
+	s.LogEvent(opts.ID, "session_start", fmt.Sprintf(`{"claude_session_id":"%s","project":"%s"}`, opts.ClaudeSessionID, opts.ProjectName))
+
 	return nil
 }
 
 // End marks a session as ended
 func (s *Service) End(id string) error {
+	return s.EndWithReason(id, "")
+}
+
+// EndWithReason marks a session as ended with a reason
+func (s *Service) EndWithReason(id, reason string) error {
 	result, err := s.db.Exec(`
 		UPDATE sessions 
 		SET status = 'complete', ended_at = CURRENT_TIMESTAMP
@@ -114,7 +179,116 @@ func (s *Service) End(id string) error {
 		return fmt.Errorf("세션 '%s'을(를) 찾을 수 없거나 이미 종료됨", id)
 	}
 
+	// 세션 종료 이벤트 로깅
+	s.LogEvent(id, "session_end", fmt.Sprintf(`{"reason":"%s"}`, reason))
+
 	return nil
+}
+
+// LogEvent logs a session event
+func (s *Service) LogEvent(sessionID, eventType, eventData string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO session_events (session_id, event_type, event_data)
+		VALUES (?, ?, ?)
+	`, sessionID, eventType, eventData)
+	return err
+}
+
+// GetEvents returns events for a session
+func (s *Service) GetEvents(sessionID string, limit int) ([]SessionEvent, error) {
+	query := `
+		SELECT id, session_id, event_type, COALESCE(event_data, ''), created_at
+		FROM session_events
+		WHERE session_id = ?
+		ORDER BY created_at DESC
+	`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := s.db.Query(query, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []SessionEvent
+	for rows.Next() {
+		var e SessionEvent
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.EventType, &e.EventData, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+// GetRecentEvents returns recent events across all sessions
+func (s *Service) GetRecentEvents(limit int) ([]SessionEvent, error) {
+	query := `
+		SELECT id, session_id, event_type, COALESCE(event_data, ''), created_at
+		FROM session_events
+		ORDER BY created_at DESC
+	`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []SessionEvent
+	for rows.Next() {
+		var e SessionEvent
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.EventType, &e.EventData, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+// FindByClaudeSessionID finds a session by Claude Code session ID
+func (s *Service) FindByClaudeSessionID(claudeSessionID string) (*Session, error) {
+	var sess Session
+	var sessionType, parentSession sql.NullString
+
+	err := s.db.QueryRow(`
+		SELECT id, port_id, title, status, 
+		       COALESCE(session_type, 'single'), parent_session,
+		       started_at, ended_at, jsonl_path,
+		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		       cost_usd, compact_count, last_compact_at,
+		       claude_session_id, project_root, project_name, transcript_path, cwd
+		FROM sessions WHERE claude_session_id = ? AND status = 'running'
+		ORDER BY started_at DESC LIMIT 1
+	`, claudeSessionID).Scan(
+		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+		&sessionType, &parentSession,
+		&sess.StartedAt, &sess.EndedAt,
+		&sess.JSONLPath, &sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+		&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount, &sess.LastCompactAt,
+		&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName, &sess.TranscriptPath, &sess.Cwd,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("세션을 찾을 수 없습니다")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if sessionType.Valid {
+		sess.SessionType = sessionType.String
+	} else {
+		sess.SessionType = TypeSingle
+	}
+	sess.ParentSession = parentSession
+
+	return &sess, nil
 }
 
 // UpdateStatus updates session status
@@ -367,4 +541,186 @@ func (s *Service) UpdateUsage(id string, input, output, cacheRead, cacheCreate i
 		WHERE id = ?
 	`, input, output, cacheRead, cacheCreate, cost, id)
 	return err
+}
+
+// SessionStats represents session statistics
+type SessionStats struct {
+	TotalSessions     int     `json:"total_sessions"`
+	ActiveSessions    int     `json:"active_sessions"`
+	CompletedSessions int     `json:"completed_sessions"`
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+	TotalCacheRead    int64   `json:"total_cache_read_tokens"`
+	TotalCacheCreate  int64   `json:"total_cache_create_tokens"`
+	TotalCostUSD      float64 `json:"total_cost_usd"`
+	TotalDurationSecs int64   `json:"total_duration_secs"`
+	AvgDurationSecs   float64 `json:"avg_duration_secs"`
+}
+
+// GetStats returns overall session statistics
+func (s *Service) GetStats() (*SessionStats, error) {
+	stats := &SessionStats{}
+
+	// Count sessions by status
+	err := s.db.QueryRow(`
+		SELECT 
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as active,
+			SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) as completed
+		FROM sessions
+	`).Scan(&stats.TotalSessions, &stats.ActiveSessions, &stats.CompletedSessions)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sum token usage and cost
+	err = s.db.QueryRow(`
+		SELECT 
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(cache_read_tokens), 0),
+			COALESCE(SUM(cache_create_tokens), 0),
+			COALESCE(SUM(cost_usd), 0)
+		FROM sessions
+	`).Scan(&stats.TotalInputTokens, &stats.TotalOutputTokens, 
+		&stats.TotalCacheRead, &stats.TotalCacheCreate, &stats.TotalCostUSD)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate total and average duration for completed sessions
+	err = s.db.QueryRow(`
+		SELECT 
+			COALESCE(SUM(CAST((julianday(ended_at) - julianday(started_at)) * 86400 AS INTEGER)), 0),
+			COALESCE(AVG(CAST((julianday(ended_at) - julianday(started_at)) * 86400 AS REAL)), 0)
+		FROM sessions
+		WHERE ended_at IS NOT NULL
+	`).Scan(&stats.TotalDurationSecs, &stats.AvgDurationSecs)
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+// SessionDetail represents detailed session info with duration
+type SessionDetail struct {
+	Session
+	DurationSecs  int64  `json:"duration_secs"`
+	DurationStr   string `json:"duration_str"`
+	ChildrenCount int    `json:"children_count"`
+}
+
+// GetDetail returns session with computed fields
+func (s *Service) GetDetail(id string) (*SessionDetail, error) {
+	sess, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	detail := &SessionDetail{Session: *sess}
+
+	// Calculate duration
+	if sess.EndedAt.Valid {
+		detail.DurationSecs = int64(sess.EndedAt.Time.Sub(sess.StartedAt).Seconds())
+	} else {
+		detail.DurationSecs = int64(time.Since(sess.StartedAt).Seconds())
+	}
+	detail.DurationStr = formatDuration(detail.DurationSecs)
+
+	// Count children
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE parent_session = ?`, id).Scan(&detail.ChildrenCount)
+	if err != nil {
+		detail.ChildrenCount = 0
+	}
+
+	return detail, nil
+}
+
+// ListDetailed returns sessions with computed fields
+func (s *Service) ListDetailed(activeOnly bool, limit int) ([]SessionDetail, error) {
+	sessions, err := s.List(activeOnly, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	details := make([]SessionDetail, len(sessions))
+	for i, sess := range sessions {
+		details[i] = SessionDetail{Session: sess}
+
+		// Calculate duration
+		if sess.EndedAt.Valid {
+			details[i].DurationSecs = int64(sess.EndedAt.Time.Sub(sess.StartedAt).Seconds())
+		} else {
+			details[i].DurationSecs = int64(time.Since(sess.StartedAt).Seconds())
+		}
+		details[i].DurationStr = formatDuration(details[i].DurationSecs)
+
+		// Count children
+		s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE parent_session = ?`, sess.ID).Scan(&details[i].ChildrenCount)
+	}
+
+	return details, nil
+}
+
+// GetHistory returns sessions grouped by date
+func (s *Service) GetHistory(days int) ([]map[string]interface{}, error) {
+	query := `
+		SELECT 
+			DATE(started_at) as date,
+			COUNT(*) as count,
+			SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) as completed,
+			COALESCE(SUM(input_tokens), 0) as input_tokens,
+			COALESCE(SUM(output_tokens), 0) as output_tokens,
+			COALESCE(SUM(cost_usd), 0) as cost_usd,
+			COALESCE(SUM(CAST((julianday(COALESCE(ended_at, CURRENT_TIMESTAMP)) - julianday(started_at)) * 86400 AS INTEGER)), 0) as total_duration
+		FROM sessions
+		WHERE started_at >= DATE('now', '-' || ? || ' days')
+		GROUP BY DATE(started_at)
+		ORDER BY date DESC
+	`
+
+	rows, err := s.db.Query(query, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var history []map[string]interface{}
+	for rows.Next() {
+		var date string
+		var count, completed int
+		var inputTokens, outputTokens, totalDuration int64
+		var costUSD float64
+
+		if err := rows.Scan(&date, &count, &completed, &inputTokens, &outputTokens, &costUSD, &totalDuration); err != nil {
+			return nil, err
+		}
+
+		history = append(history, map[string]interface{}{
+			"date":           date,
+			"count":          count,
+			"completed":      completed,
+			"input_tokens":   inputTokens,
+			"output_tokens":  outputTokens,
+			"cost_usd":       costUSD,
+			"total_duration": totalDuration,
+			"duration_str":   formatDuration(totalDuration),
+		})
+	}
+
+	return history, nil
+}
+
+// formatDuration formats seconds into human readable string
+func formatDuration(secs int64) string {
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%dm %ds", secs/60, secs%60)
+	}
+	hours := secs / 3600
+	mins := (secs % 3600) / 60
+	return fmt.Sprintf("%dh %dm", hours, mins)
 }

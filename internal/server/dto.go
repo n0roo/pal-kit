@@ -34,8 +34,8 @@ func toSessionDTO(s session.Session) SessionDTO {
 	if s.Title.Valid {
 		dto.Title = s.Title.String
 	}
-	if s.SessionType.Valid {
-		dto.SessionType = s.SessionType.String
+	if s.SessionType != "" {
+		dto.SessionType = s.SessionType
 	}
 	if s.ParentSession.Valid {
 		dto.Parent = s.ParentSession.String
@@ -51,6 +51,66 @@ func toSessionDTOs(sessions []session.Session) []SessionDTO {
 	result := make([]SessionDTO, len(sessions))
 	for i, s := range sessions {
 		result[i] = toSessionDTO(s)
+	}
+	return result
+}
+
+// SessionDetailDTO includes duration and children count
+type SessionDetailDTO struct {
+	ID            string  `json:"id"`
+	PortID        string  `json:"port_id,omitempty"`
+	Title         string  `json:"title,omitempty"`
+	Status        string  `json:"status"`
+	SessionType   string  `json:"session_type,omitempty"`
+	Parent        string  `json:"parent,omitempty"`
+	StartedAt     string  `json:"started_at,omitempty"`
+	EndedAt       string  `json:"ended_at,omitempty"`
+	DurationSecs  int64   `json:"duration_secs"`
+	DurationStr   string  `json:"duration_str"`
+	ChildrenCount int     `json:"children_count"`
+	InputTokens   int64   `json:"input_tokens"`
+	OutputTokens  int64   `json:"output_tokens"`
+	CacheRead     int64   `json:"cache_read_tokens"`
+	CacheCreate   int64   `json:"cache_create_tokens"`
+	CostUSD       float64 `json:"cost_usd"`
+	CompactCount  int     `json:"compact_count"`
+}
+
+func toSessionDetailDTO(d session.SessionDetail) SessionDetailDTO {
+	dto := SessionDetailDTO{
+		ID:            d.ID,
+		Status:        d.Status,
+		SessionType:   d.SessionType,
+		DurationSecs:  d.DurationSecs,
+		DurationStr:   d.DurationStr,
+		ChildrenCount: d.ChildrenCount,
+		InputTokens:   d.InputTokens,
+		OutputTokens:  d.OutputTokens,
+		CacheRead:     d.CacheReadTokens,
+		CacheCreate:   d.CacheCreateTokens,
+		CostUSD:       d.CostUSD,
+		CompactCount:  d.CompactCount,
+	}
+	if d.PortID.Valid {
+		dto.PortID = d.PortID.String
+	}
+	if d.Title.Valid {
+		dto.Title = d.Title.String
+	}
+	if d.ParentSession.Valid {
+		dto.Parent = d.ParentSession.String
+	}
+	dto.StartedAt = d.StartedAt.Format(time.RFC3339)
+	if d.EndedAt.Valid {
+		dto.EndedAt = d.EndedAt.Time.Format(time.RFC3339)
+	}
+	return dto
+}
+
+func toSessionDetailDTOs(details []session.SessionDetail) []SessionDetailDTO {
+	result := make([]SessionDetailDTO, len(details))
+	for i, d := range details {
+		result[i] = toSessionDetailDTO(d)
 	}
 	return result
 }

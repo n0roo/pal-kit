@@ -7,6 +7,7 @@ let refreshInterval;
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initRefresh();
+    initModal();
     loadAllData();
     
     // Auto refresh every 10 seconds
@@ -31,6 +32,112 @@ function switchTab(tab) {
     
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.toggle('active', content.id === `tab-${tab}`);
+    });
+}
+
+// Modal
+function initModal() {
+    const modal = document.getElementById('session-modal');
+    const closeBtn = modal.querySelector('.modal-close');
+    
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+}
+
+function showSessionDetail(sessionId) {
+    fetchAPI(`sessions/${sessionId}`).then(data => {
+        if (!data) return;
+        
+        const modal = document.getElementById('session-modal');
+        const body = document.getElementById('session-modal-body');
+        const s = data.session;
+        const children = data.children || [];
+        
+        body.innerHTML = `
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <label>ID</label>
+                    <span>${escapeHtml(s.id)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Title</label>
+                    <span>${escapeHtml(s.title || '-')}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Status</label>
+                    <span>${statusBadge(s.status)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Type</label>
+                    <span>${escapeHtml(s.session_type || 'single')}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Parent</label>
+                    <span>${s.parent ? `<a href="#" onclick="showSessionDetail('${s.parent}')">${s.parent}</a>` : '-'}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Port</label>
+                    <span>${escapeHtml(s.port_id || '-')}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Duration</label>
+                    <span>${escapeHtml(s.duration_str || '-')}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Started</label>
+                    <span>${formatDate(s.started_at)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Ended</label>
+                    <span>${formatDate(s.ended_at)}</span>
+                </div>
+            </div>
+            
+            <h4>Token Usage</h4>
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <label>Input</label>
+                    <span>${formatNumber(s.input_tokens)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Output</label>
+                    <span>${formatNumber(s.output_tokens)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Cache Read</label>
+                    <span>${formatNumber(s.cache_read_tokens)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Cache Create</label>
+                    <span>${formatNumber(s.cache_create_tokens)}</span>
+                </div>
+                <div class="detail-item highlight">
+                    <label>Cost (USD)</label>
+                    <span>$${(s.cost_usd || 0).toFixed(4)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Compactions</label>
+                    <span>${s.compact_count || 0}</span>
+                </div>
+            </div>
+            
+            ${children.length > 0 ? `
+                <h4>Child Sessions (${children.length})</h4>
+                <div class="children-list">
+                    ${children.map(c => `
+                        <div class="child-item" onclick="showSessionDetail('${c.id}')">
+                            ${statusBadge(c.status)}
+                            <span>${escapeHtml(c.id)}</span>
+                            <span class="muted">${escapeHtml(c.title || '')}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+        `;
+        
+        modal.classList.remove('hidden');
     });
 }
 
@@ -60,7 +167,9 @@ async function fetchAPI(endpoint) {
 async function loadAllData() {
     await Promise.all([
         loadStatus(),
+        loadSessionStats(),
         loadSessions(),
+        loadHistory(),
         loadPorts(),
         loadPipelines(),
         loadDocs(),
@@ -78,12 +187,22 @@ async function loadStatus() {
     setStatValue('sessions-active', data.sessions?.active ?? 0);
     setStatValue('ports-total', data.ports?.total ?? 0);
     setStatValue('pipelines-running', data.pipelines?.running ?? 0);
-    setStatValue('docs-total', data.docs?.total ?? 0);
-    setStatValue('conventions-enabled', data.conventions?.enabled ?? 0);
-    setStatValue('locks-active', data.locks?.active ?? 0);
     setStatValue('escalations-open', data.escalations?.open ?? 0);
     
     document.getElementById('project-root').textContent = data.project_root || '';
+}
+
+// Session Stats
+async function loadSessionStats() {
+    const data = await fetchAPI('sessions/stats');
+    if (!data) return;
+    
+    setStatValue('sessions-completed', data.completed_sessions ?? 0);
+    
+    const totalTokens = (data.total_input_tokens || 0) + (data.total_output_tokens || 0);
+    setStatValue('total-tokens', formatNumber(totalTokens));
+    setStatValue('total-cost', `$${(data.total_cost_usd || 0).toFixed(2)}`);
+    setStatValue('total-duration', formatDuration(data.total_duration_secs || 0));
 }
 
 function setStatValue(id, value) {
@@ -97,17 +216,43 @@ async function loadSessions() {
     const tbody = document.getElementById('sessions-table');
     
     if (!data || data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No sessions</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No sessions</td></tr>';
         return;
     }
     
     tbody.innerHTML = data.map(s => `
-        <tr>
+        <tr onclick="showSessionDetail('${s.id}')" style="cursor:pointer">
             <td>${statusBadge(s.status || 'unknown')}</td>
             <td class="text-sm">${escapeHtml(s.id || '-')}</td>
-            <td>${escapeHtml(getNullableString(s.title))}</td>
-            <td>${escapeHtml(getNullableString(s.port_id))}</td>
-            <td class="text-sm muted">${formatDate(s.started_at)}</td>
+            <td>${escapeHtml(s.title || '-')}</td>
+            <td>${escapeHtml(s.session_type || 'single')}</td>
+            <td>${escapeHtml(s.duration_str || '-')}</td>
+            <td class="text-sm">${formatNumber(s.input_tokens + s.output_tokens)}</td>
+            <td class="text-sm">$${(s.cost_usd || 0).toFixed(4)}</td>
+            <td>${s.children_count || 0}</td>
+        </tr>
+    `).join('');
+}
+
+// History
+async function loadHistory() {
+    const data = await fetchAPI('sessions/history?days=30');
+    const tbody = document.getElementById('history-table');
+    
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No history</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = data.map(h => `
+        <tr>
+            <td>${escapeHtml(h.date)}</td>
+            <td>${h.count}</td>
+            <td>${h.completed}</td>
+            <td class="text-sm">${formatNumber(h.input_tokens)}</td>
+            <td class="text-sm">${formatNumber(h.output_tokens)}</td>
+            <td>${escapeHtml(h.duration_str || '-')}</td>
+            <td>$${(h.cost_usd || 0).toFixed(4)}</td>
         </tr>
     `).join('');
 }
@@ -126,8 +271,8 @@ async function loadPorts() {
         <tr>
             <td>${statusBadge(p.status || 'unknown')}</td>
             <td class="text-sm">${escapeHtml(p.id || '-')}</td>
-            <td>${escapeHtml(getNullableString(p.title))}</td>
-            <td>${escapeHtml(getNullableString(p.pipeline_id))}</td>
+            <td>${escapeHtml(p.title || '-')}</td>
+            <td>${escapeHtml(p.session_id || '-')}</td>
             <td class="text-sm muted">${formatDate(p.created_at)}</td>
         </tr>
     `).join('');
@@ -223,33 +368,6 @@ async function loadAgents() {
 }
 
 // Helpers
-
-/**
- * Get value from Go's sql.NullString (or similar nullable types)
- * Handles: {String: "value", Valid: true} or plain string or null
- */
-function getNullableString(field) {
-    if (field === null || field === undefined) return '-';
-    if (typeof field === 'string') return field || '-';
-    if (typeof field === 'object') {
-        // Go's sql.NullString format
-        if (field.Valid === true && field.String !== undefined) {
-            return field.String || '-';
-        }
-        // Go's sql.NullInt64, sql.NullTime, etc.
-        if (field.Valid === true && field.Int64 !== undefined) {
-            return String(field.Int64);
-        }
-        if (field.Valid === true && field.Time !== undefined) {
-            return field.Time;
-        }
-    }
-    return '-';
-}
-
-/**
- * Escape HTML to prevent XSS
- */
 function escapeHtml(text) {
     if (text === null || text === undefined) return '-';
     const str = String(text);
@@ -265,16 +383,6 @@ function statusBadge(status) {
 
 function formatDate(dateStr) {
     if (!dateStr) return '-';
-    
-    // Handle Go's sql.NullTime
-    if (typeof dateStr === 'object') {
-        if (dateStr.Valid === true && dateStr.Time) {
-            dateStr = dateStr.Time;
-        } else {
-            return '-';
-        }
-    }
-    
     try {
         const date = new Date(dateStr);
         if (isNaN(date.getTime())) return '-';
@@ -286,16 +394,26 @@ function formatDate(dateStr) {
 
 function formatBytes(bytes) {
     if (bytes === null || bytes === undefined || bytes === 0) return '0 B';
-    
-    // Handle nullable
-    if (typeof bytes === 'object' && bytes.Valid !== undefined) {
-        bytes = bytes.Valid ? (bytes.Int64 || 0) : 0;
-    }
-    
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatNumber(num) {
+    if (num === null || num === undefined) return '0';
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+}
+
+function formatDuration(secs) {
+    if (!secs || secs === 0) return '0s';
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+    const hours = Math.floor(secs / 3600);
+    const mins = Math.floor((secs % 3600) / 60);
+    return `${hours}h ${mins}m`;
 }
 
 function typeEmoji(type) {

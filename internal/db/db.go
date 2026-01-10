@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -123,6 +123,22 @@ CREATE TABLE IF NOT EXISTS port_dependencies (
 );
 `
 
+// v3 추가 테이블
+const schemaV3 = `
+-- 세션 이벤트 (히스토리)
+CREATE TABLE IF NOT EXISTS session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -175,6 +191,11 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v2 스키마 적용 실패: %w", err)
 	}
 
+	// 4. v3 테이블 적용
+	if _, err := d.Exec(schemaV3); err != nil {
+		return fmt.Errorf("v3 스키마 적용 실패: %w", err)
+	}
+
 	// 4. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
@@ -193,6 +214,15 @@ func (d *DB) migrate() error {
 		// 컬럼 존재 여부 확인 후 추가
 		d.Exec(`ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'single'`)
 		d.Exec(`ALTER TABLE sessions ADD COLUMN parent_session TEXT`)
+	}
+
+	// v2 -> v3: 프로젝트 정보 및 Claude 세션 ID 추가
+	if currentVersion < 3 {
+		d.Exec(`ALTER TABLE sessions ADD COLUMN claude_session_id TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN project_root TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN project_name TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN transcript_path TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT`)
 	}
 
 	return nil

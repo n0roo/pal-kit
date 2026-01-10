@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/n0roo/pal-kit/internal/agent"
@@ -51,6 +53,9 @@ func (s *Server) Start() error {
 	// API routes
 	mux.HandleFunc("/api/status", s.withCORS(s.handleStatus))
 	mux.HandleFunc("/api/sessions", s.withCORS(s.handleSessions))
+	mux.HandleFunc("/api/sessions/stats", s.withCORS(s.handleSessionStats))
+	mux.HandleFunc("/api/sessions/history", s.withCORS(s.handleSessionHistory))
+	mux.HandleFunc("/api/sessions/", s.withCORS(s.handleSessionDetail))
 	mux.HandleFunc("/api/ports", s.withCORS(s.handlePorts))
 	mux.HandleFunc("/api/pipelines", s.withCORS(s.handlePipelines))
 	mux.HandleFunc("/api/agents", s.withCORS(s.handleAgents))
@@ -222,13 +227,96 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	defer database.Close()
 
 	svc := session.NewService(database)
-	sessions, err := svc.List(false, 50)
+	
+	// Use detailed list for richer info
+	details, err := svc.ListDetailed(false, 50)
 	if err != nil {
 		s.errorResponse(w, 500, err.Error())
 		return
 	}
 
-	s.jsonResponse(w, toSessionDTOs(sessions))
+	s.jsonResponse(w, toSessionDetailDTOs(details))
+}
+
+// handleSessionStats returns session statistics
+func (s *Server) handleSessionStats(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := session.NewService(database)
+	stats, err := svc.GetStats()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, stats)
+}
+
+// handleSessionHistory returns session history by date
+func (s *Server) handleSessionHistory(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	// Default to 30 days
+	days := 30
+	if d := r.URL.Query().Get("days"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
+			days = parsed
+		}
+	}
+
+	svc := session.NewService(database)
+	history, err := svc.GetHistory(days)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, history)
+}
+
+// handleSessionDetail returns single session detail
+func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
+	// Extract session ID from path: /api/sessions/{id}
+	path := r.URL.Path
+	id := strings.TrimPrefix(path, "/api/sessions/")
+	if id == "" || id == "stats" || id == "history" {
+		s.errorResponse(w, 400, "session ID required")
+		return
+	}
+
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := session.NewService(database)
+	detail, err := svc.GetDetail(id)
+	if err != nil {
+		s.errorResponse(w, 404, err.Error())
+		return
+	}
+
+	// Also get children
+	children, _ := svc.GetChildren(id)
+
+	response := map[string]interface{}{
+		"session":  toSessionDetailDTO(*detail),
+		"children": toSessionDTOs(children),
+	}
+
+	s.jsonResponse(w, response)
 }
 
 // handlePorts returns port list
