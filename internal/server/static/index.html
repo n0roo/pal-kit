@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAL Kit Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <h1>🚀 PAL Kit Dashboard</h1>
+            <div class="header-actions">
+                <span id="last-update" class="muted">Loading...</span>
+                <button id="refresh-btn" class="btn btn-secondary">↻ Refresh</button>
+            </div>
+        </header>
+
+        <nav class="nav">
+            <button class="nav-btn active" data-tab="status">Overview</button>
+            <button class="nav-btn" data-tab="sessions">Sessions</button>
+            <button class="nav-btn" data-tab="ports">Ports</button>
+            <button class="nav-btn" data-tab="pipelines">Pipelines</button>
+            <button class="nav-btn" data-tab="docs">Documents</button>
+            <button class="nav-btn" data-tab="conventions">Conventions</button>
+            <button class="nav-btn" data-tab="agents">Agents</button>
+        </nav>
+
+        <main class="main">
+            <!-- Status Tab -->
+            <section id="tab-status" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">📍</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-sessions-active">-</div>
+                            <div class="stat-label">Active Sessions</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📦</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-ports-total">-</div>
+                            <div class="stat-label">Ports</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔄</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-pipelines-running">-</div>
+                            <div class="stat-label">Running Pipelines</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📚</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-docs-total">-</div>
+                            <div class="stat-label">Documents</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📋</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-conventions-enabled">-</div>
+                            <div class="stat-label">Enabled Conventions</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔒</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-locks-active">-</div>
+                            <div class="stat-label">Active Locks</div>
+                        </div>
+                    </div>
+                    <div class="stat-card warning">
+                        <div class="stat-icon">🚨</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-escalations-open">-</div>
+                            <div class="stat-label">Open Escalations</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sessions Tab -->
+            <section id="tab-sessions" class="tab-content">
+                <h2>Sessions</h2>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Port</th>
+                                <th>Started</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessions-table"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Ports Tab -->
+            <section id="tab-ports" class="tab-content">
+                <h2>Ports</h2>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Pipeline</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ports-table"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Pipelines Tab -->
+            <section id="tab-pipelines" class="tab-content">
+                <h2>Pipelines</h2>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pipelines-table"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Documents Tab -->
+            <section id="tab-docs" class="tab-content">
+                <h2>Documents</h2>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Path</th>
+                                <th>Type</th>
+                                <th>Size</th>
+                                <th>Modified</th>
+                            </tr>
+                        </thead>
+                        <tbody id="docs-table"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Conventions Tab -->
+            <section id="tab-conventions" class="tab-content">
+                <h2>Conventions</h2>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Rules</th>
+                                <th>Priority</th>
+                            </tr>
+                        </thead>
+                        <tbody id="conventions-table"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Agents Tab -->
+            <section id="tab-agents" class="tab-content">
+                <h2>Agents</h2>
+                <div class="cards-grid" id="agents-grid"></div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <span>PAL Kit v0.2.5</span>
+            <span id="project-root" class="muted"></span>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
