@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/n0roo/pal-kit/internal/agent"
 	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/spf13/cobra"
@@ -127,136 +128,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 func createGlobalAgents() error {
 	agentsDir := config.GlobalAgentsDir()
 
-	// Builder agent
-	builderContent := `agent:
-  id: builder
-  name: Builder Agent
-  type: builder
-  description: |
-    요건을 분석하고, 태스크를 분해하고, 세션을 기획하는 최상위 에이전트입니다.
-  prompt: |
-    # Builder Agent
-
-    당신은 빌더 에이전트입니다.
-
-    ## 책임
-    - 요건 분석 및 태스크 분해
-    - 에이전트 구성 계획
-    - 하위 세션 spawn 및 관리
-    - 파이프라인 진행 상황 모니터링
-
-    ## 사용 가능한 도구
-    - pal session start --type sub --port <id>
-    - pal pipeline create/add/plan/exec
-    - pal port create/status
-    - pal status
-
-    ## 워크플로우
-    1. 요건 분석 - 사용자 요구사항 이해
-    2. 작업 분해 - 포트 단위로 분할
-    3. 에이전트 할당 - 적합한 에이전트 선택
-    4. 파이프라인 구성 - 의존성 설정
-    5. 실행 및 모니터링 - 진행 상황 추적
-
-    ## 포트 명세 작성 원칙
-    - 자기완결적: 포트 문서만으로 작업 가능
-    - 명확한 범위: 포함/제외 명시
-    - 완료 조건: 체크리스트 형태
-  tools:
-    - bash
-    - pal
-  context:
-    - CLAUDE.md
-    - agents/*.yaml
-    - ports/
-`
-	if err := os.WriteFile(filepath.Join(agentsDir, "builder.yaml"), []byte(builderContent), 0644); err != nil {
-		return err
-	}
-
-	// Worker agent
-	workerContent := `agent:
-  id: worker
-  name: Generic Worker
-  type: worker
-  description: |
-    포트 명세에 따라 실제 작업을 수행하는 범용 워커 에이전트입니다.
-  prompt: |
-    # Generic Worker Agent
-
-    당신은 워커 에이전트입니다.
-
-    ## 책임
-    - 할당된 포트 명세에 따라 작업 수행
-    - 컨벤션 준수
-    - 완료 조건 충족
-    - 문제 발생 시 에스컬레이션
-
-    ## 작업 시작 전
-    1. 포트 명세 확인
-    2. 완료 조건 체크리스트 확인
-    3. 관련 컨벤션 확인
-
-    ## 작업 중
-    - 포트 범위 내에서만 작업
-    - 단계별 진행 상황 기록
-    - 블로커 발생 시 즉시 보고
-
-    ## 작업 완료
-    - 모든 완료 조건 체크
-    - pal hook port-end <port-id>
-    - 산출물 정리
-  tools:
-    - bash
-    - editor
-  context:
-    - ports/{port-id}.md
-    - conventions/
-`
-	if err := os.WriteFile(filepath.Join(agentsDir, "worker.yaml"), []byte(workerContent), 0644); err != nil {
-		return err
-	}
-
-	// Analyzer agent
-	analyzerContent := `agent:
-  id: analyzer
-  name: Project Analyzer
-  type: analyzer
-  description: |
-    프로젝트 구조를 분석하고 컨벤션/에이전트를 제안하는 에이전트입니다.
-  prompt: |
-    # Project Analyzer Agent
-
-    당신은 프로젝트 분석 에이전트입니다.
-
-    ## 책임
-    - 프로젝트 구조 분석
-    - 기술 스택 감지
-    - 적합한 컨벤션 제안
-    - 에이전트 구성 제안
-
-    ## 분석 항목
-    1. 언어/프레임워크 감지
-       - package.json, go.mod, requirements.txt 등
-    2. 프로젝트 구조 파악
-       - 디렉토리 구조, 주요 파일
-    3. 기존 설정 확인
-       - .eslintrc, .prettierrc, tsconfig.json 등
-    4. 코딩 스타일 추론
-       - 기존 코드에서 패턴 추출
-
-    ## 출력
-    - conventions/*.yaml 제안
-    - agents/*.yaml 제안
-    - CLAUDE.md 개선 제안
-  tools:
-    - bash
-    - read
-  context:
-    - .
-`
-	if err := os.WriteFile(filepath.Join(agentsDir, "analyzer.yaml"), []byte(analyzerContent), 0644); err != nil {
-		return err
+	// embed된 템플릿 파일들을 복사
+	if err := agent.InstallTemplates(agentsDir); err != nil {
+		return fmt.Errorf("에이전트 템플릿 설치 실패: %w", err)
 	}
 
 	return nil
