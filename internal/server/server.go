@@ -18,6 +18,7 @@ import (
 	"github.com/n0roo/pal-kit/internal/docs"
 	"github.com/n0roo/pal-kit/internal/escalation"
 	"github.com/n0roo/pal-kit/internal/lock"
+	"github.com/n0roo/pal-kit/internal/manifest"
 	"github.com/n0roo/pal-kit/internal/pipeline"
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/session"
@@ -64,6 +65,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/conventions", s.withCORS(s.handleConventions))
 	mux.HandleFunc("/api/locks", s.withCORS(s.handleLocks))
 	mux.HandleFunc("/api/escalations", s.withCORS(s.handleEscalations))
+	mux.HandleFunc("/api/manifest", s.withCORS(s.handleManifest))
+	mux.HandleFunc("/api/manifest/changes", s.withCORS(s.handleManifestChanges))
 
 	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -536,4 +539,73 @@ func Run(port int, projectRoot, dbPath string) error {
 func createDefaultStaticFiles() error {
 	// This is a fallback - normally files should be embedded
 	return nil
+}
+
+// handleManifest returns manifest status
+func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	manifestSvc := manifest.NewService(database, s.config.ProjectRoot)
+	statuses, err := manifestSvc.Status()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	// 상태별 분류
+	result := map[string]interface{}{
+		"project_root": s.config.ProjectRoot,
+		"files":        statuses,
+		"summary": map[string]int{
+			"total":    len(statuses),
+			"synced":   countByStatus(statuses, "synced"),
+			"modified": countByStatus(statuses, "modified"),
+			"new":      countByStatus(statuses, "new"),
+			"deleted":  countByStatus(statuses, "deleted"),
+		},
+	}
+
+	s.jsonResponse(w, result)
+}
+
+// handleManifestChanges returns manifest change history
+func (s *Server) handleManifestChanges(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	manifestSvc := manifest.NewService(database, s.config.ProjectRoot)
+	changes, err := manifestSvc.GetChanges(limit)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, changes)
+}
+
+// countByStatus counts files by status
+func countByStatus(files []manifest.TrackedFile, status string) int {
+	count := 0
+	for _, f := range files {
+		if string(f.Status) == status {
+			count++
+		}
+	}
+	return count
 }

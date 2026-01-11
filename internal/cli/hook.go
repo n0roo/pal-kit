@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 
 	"github.com/google/uuid"
+	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/lock"
+	"github.com/n0roo/pal-kit/internal/manifest"
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/rules"
 	"github.com/n0roo/pal-kit/internal/session"
@@ -292,6 +294,15 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 			for _, p := range runningPorts {
 				fmt.Printf("   - %s\n", p.ID)
 			}
+		}
+	}
+
+	// Manifest 변경 감지 (가벼운 알림)
+	if projectRoot != "" && config.IsInstalled() {
+		manifestSvc := manifest.NewService(database, projectRoot)
+		changedFiles, err := manifestSvc.QuickCheck()
+		if err == nil && len(changedFiles) > 0 {
+			fmt.Printf("💡 설정 파일이 변경되었습니다. `pal manifest status`로 확인해보세요.\n")
 		}
 	}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/docs"
+	"github.com/n0roo/pal-kit/internal/manifest"
 	"github.com/spf13/cobra"
 )
 
@@ -92,7 +93,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 		created = append(created, "전역 DB에 프로젝트 등록")
 	}
 
-	// 5. .gitignore 업데이트
+	// 5. Manifest 초기화 (파일 변경 추적)
+	if err := initManifest(cwd); err != nil {
+		fmt.Fprintf(os.Stderr, "경고: Manifest 초기화 실패: %v\n", err)
+	} else {
+		created = append(created, ".pal/manifest.yaml")
+	}
+
+	// 6. .gitignore 업데이트
 	if err := updateGitignore(cwd); err != nil {
 		fmt.Fprintf(os.Stderr, "경고: .gitignore 업데이트 실패: %v\n", err)
 	}
@@ -259,4 +267,16 @@ func updateGitignore(projectRoot string) error {
 
 	_, err = f.WriteString(entries)
 	return err
+}
+
+// initManifest initializes manifest for file change tracking
+func initManifest(projectRoot string) error {
+	database, err := db.Open(config.GlobalDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	manifestSvc := manifest.NewService(database, projectRoot)
+	return manifestSvc.Init()
 }

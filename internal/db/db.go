@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -160,6 +160,44 @@ CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_root);
 `
 
+// v5 추가 테이블 (Manifest 시스템)
+const schemaV5 = `
+-- 파일 Manifest (프로젝트별 파일 추적)
+CREATE TABLE IF NOT EXISTS file_manifests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_root TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    size INTEGER DEFAULT 0,
+    mtime DATETIME,
+    managed_by TEXT DEFAULT 'pal',
+    status TEXT DEFAULT 'synced',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_root, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_manifests_project ON file_manifests(project_root);
+CREATE INDEX IF NOT EXISTS idx_manifests_status ON file_manifests(project_root, status);
+CREATE INDEX IF NOT EXISTS idx_manifests_type ON file_manifests(project_root, file_type);
+
+-- 파일 변경 히스토리 (대시보드용)
+CREATE TABLE IF NOT EXISTS file_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_root TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    old_hash TEXT,
+    new_hash TEXT,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    session_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_changes_project ON file_changes(project_root, changed_at);
+CREATE INDEX IF NOT EXISTS idx_changes_session ON file_changes(session_id);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -222,7 +260,12 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v4 스키마 적용 실패: %w", err)
 	}
 
-	// 6. 버전 저장
+	// 6. v5 테이블 적용 (Manifest)
+	if _, err := d.Exec(schemaV5); err != nil {
+		return fmt.Errorf("v5 스키마 적용 실패: %w", err)
+	}
+
+	// 7. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)
