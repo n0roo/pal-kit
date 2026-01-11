@@ -2,25 +2,25 @@ agent:
   id: architect
   name: Architect
   type: core
-  workflow: [single, integrate, multi]
-  
+  workflow: [ single, integrate, multi ]
+
   description: |
     아키텍처 설계와 기술 결정을 담당하는 에이전트.
     시스템 구조와 기술 스택을 설계합니다.
-  
+
   responsibilities:
     - 기술 스택 선택
     - 아키텍처 패턴 결정
     - 디렉토리 구조 설계
     - 모듈/레이어 구성
     - 워커 에이전트 유형 결정
-  
+
   outputs:
     - 아키텍처 문서
     - 기술 결정 기록 (ADR)
     - 디렉토리 구조
     - 워커 에이전트 제안
-  
+
   prompt: |
     # Architect
     

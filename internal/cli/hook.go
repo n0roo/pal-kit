@@ -16,6 +16,7 @@ import (
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/rules"
 	"github.com/n0roo/pal-kit/internal/session"
+	"github.com/n0roo/pal-kit/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -306,6 +307,21 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// 워크플로우 컨텍스트 주입 (rules 파일로)
+	if projectRoot != "" {
+		workflowSvc := workflow.NewService(projectRoot)
+		ctx, err := workflowSvc.GetContext()
+		if err == nil {
+			if err := workflowSvc.WriteRulesFile(ctx); err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "워크플로우 rules 작성 실패: %v\n", err)
+				}
+			} else if verbose {
+				fmt.Printf("📝 Workflow context: %s (%s)\n", ctx.WorkflowType, workflowSvc.GetRulesPath())
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -328,6 +344,19 @@ func runHookSessionEnd(cmd *cobra.Command, args []string) error {
 	claudeSessionID := input.SessionID
 	if claudeSessionID == "" {
 		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+
+	// 프로젝트 루트 찾기
+	cwd := input.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	projectRoot := context.FindProjectRoot(cwd)
+
+	// 워크플로우 rules 파일 정리
+	if projectRoot != "" {
+		workflowSvc := workflow.NewService(projectRoot)
+		workflowSvc.CleanupRulesFile()
 	}
 
 	if claudeSessionID != "" {
