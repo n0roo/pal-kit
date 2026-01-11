@@ -214,38 +214,116 @@ func (s *Service) InitProject(projectName string) ([]string, error) {
 // Template contents
 const claudeMDTemplate = `# {{.ProjectName}}
 
-> 생성일: {{.Date}}
+> PAL Kit 관리 프로젝트 | 생성일: {{.Date}}
 
-## 프로젝트 개요
+---
 
-이 프로젝트는 ...
+## 🚀 PAL Kit 초기 설정 필요
+
+이 프로젝트는 **PAL Kit 환경이 구성되지 않았습니다.**
+
+### Claude에게 요청하세요:
+
+` + "```" + `
+이 프로젝트의 PAL Kit 환경을 설정해줘
+` + "```" + `
+
+또는 직접 실행:
+
+` + "```bash" + `
+pal setup
+` + "```" + `
+
+---
+
+## 설정 플로우 안내 (Claude용)
+
+### 1단계: 프로젝트 분석
+
+` + "```bash" + `
+pal analyze --json
+` + "```" + `
+
+실행 후 분석 결과를 확인하고 사용자에게 설명합니다.
+
+### 2단계: 워크플로우 선택
+
+| 타입 | 설명 | 적합한 경우 |
+|------|------|------------|
+| **simple** | 대화형 협업, 종합 에이전트 | 간단한 작업, 학습 |
+| **single** | 단일 세션, 역할 전환 | 중간 규모 기능 |
+| **integrate** | 빌더 관리, 서브세션 | 복잡한 기능, 여러 기술 |
+| **multi** | 복수 integrate | 대규모 프로젝트 |
+
+사용자에게 추천 워크플로우를 설명하고 확인합니다.
+
+### 3단계: 설정 적용
+
+` + "```bash" + `
+# 워크플로우 설정
+pal config set workflow <type>
+
+# 필요한 워커 에이전트 추가 (기술 스택에 따라)
+pal agent add workers/backend/go
+pal agent add workers/frontend/react
+
+# 설정 확인
+pal config show
+` + "```" + `
+
+### 4단계: CLAUDE.md 업데이트
+
+설정 완료 후 이 파일의 "설정 필요" 섹션을 삭제하고,
+프로젝트 설명과 작업 가이드로 대체합니다.
+
+---
+
+## PAL Kit 기본 명령어
+
+` + "```bash" + `
+# 상태 확인
+pal status
+
+# 포트 관리
+pal port list
+pal port create <id> --title "작업명"
+
+# 작업 시작/종료
+pal hook port-start <id>
+pal hook port-end <id>
+
+# 파이프라인
+pal pipeline list
+pal pl plan <n>
+
+# 대시보드
+pal serve
+` + "```" + `
+
+---
 
 ## 디렉토리 구조
 
 ` + "```" + `
 .
-├── agents/          # 에이전트 정의
-├── ports/           # 포트 명세
-├── conventions/     # 컨벤션 문서
-├── .claude/         # Claude 설정
-│   └── rules/       # 활성 규칙
-└── .pal/            # PAL Kit 데이터
+├── CLAUDE.md           # 이 파일 (프로젝트 컨텍스트)
+├── agents/             # 에이전트 정의
+├── ports/              # 포트 명세
+├── conventions/        # 컨벤션 문서
+├── .claude/
+│   ├── settings.json   # Claude Code Hook 설정
+│   └── rules/          # 조건부 규칙
+└── .pal/
+    └── config.yaml     # PAL Kit 설정 (설정 후 생성)
 ` + "```" + `
 
-## 개발 규칙
+---
 
-1. 모든 변경은 포트 단위로 진행
-2. 에이전트는 역할에 맞는 작업만 수행
-3. 컨벤션을 준수
-
-## 컨벤션
-
-- [코딩 스타일](conventions/coding-style.md)
-- [커밋 메시지](conventions/commit-message.md)
-
-<!-- pal:context:start -->
-<!-- PAL Kit이 자동으로 업데이트합니다 -->
-<!-- pal:context:end -->
+<!-- pal:config:status=pending -->
+<!-- 
+  PAL Kit 설정 상태: 미완료
+  설정 완료 후 이 섹션이 업데이트됩니다.
+-->
 `
 
 const agentBuilderTemplate = `agent:

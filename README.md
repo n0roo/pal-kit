@@ -1,10 +1,12 @@
 # PAL Kit
 
 > Personal Agentic Layer - Claude Code 에이전트 오케스트레이션 도구
+> Port And Adapter Layer Architecture Base Agentic Tools - Port Adapter(Hexagonal) + Layer Architecture 기반 설계 도움 에이전트
 
 ## 개요
 
 PAL Kit은 Claude Code와 함께 사용하여 복잡한 작업을 체계적으로 관리하는 CLI 도구입니다.
+PAL kit의 업무 제안방식은 자기완결적 Port명세를 통한 Adapter(구현체)를 계층구조로 설계하고 작업하는 방식입니다.
 
 ## 주요 기능
 

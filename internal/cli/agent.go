@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/n0roo/pal-kit/internal/agent"
+	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +64,37 @@ var agentTypesCmd = &cobra.Command{
 	RunE:  runAgentTypes,
 }
 
+var agentTemplatesCmd = &cobra.Command{
+	Use:   "templates",
+	Short: "사용 가능한 템플릿 목록",
+	Long: `전역 에이전트 템플릿 목록을 표시합니다.
+
+템플릿 위치: ~/.pal/agents/
+
+템플릿을 프로젝트에 추가:
+  pal agent add worker-go
+  pal agent add core/builder
+`,
+	RunE: runAgentTemplates,
+}
+
+var agentAddCmd = &cobra.Command{
+	Use:   "add <template>",
+	Short: "템플릿에서 에이전트 추가",
+	Long: `전역 템플릿에서 에이전트를 프로젝트에 추가합니다.
+
+사용 가능한 템플릿 확인:
+  pal agent templates
+
+예시:
+  pal agent add core/collaborator   # Core 에이전트
+  pal agent add workers/backend/go  # Go 워커
+  pal agent add workers/frontend/react  # React 워커
+`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAgentAdd,
+}
+
 func init() {
 	rootCmd.AddCommand(agentCmd)
 	agentCmd.AddCommand(agentListCmd)
@@ -70,6 +103,8 @@ func init() {
 	agentCmd.AddCommand(agentDeleteCmd)
 	agentCmd.AddCommand(agentPromptCmd)
 	agentCmd.AddCommand(agentTypesCmd)
+	agentCmd.AddCommand(agentTemplatesCmd)
+	agentCmd.AddCommand(agentAddCmd)
 
 	agentCreateCmd.Flags().StringVar(&agentType, "type", "worker", "에이전트 타입")
 	agentCreateCmd.Flags().StringVar(&agentPrompt, "prompt", "", "프롬프트 (또는 file:경로)")
@@ -280,6 +315,186 @@ func runAgentTypes(cmd *cobra.Command, args []string) error {
 	for _, t := range types {
 		fmt.Printf("  %-10s  %s\n", t, descriptions[t])
 	}
+
+	return nil
+}
+
+func runAgentTemplates(cmd *cobra.Command, args []string) error {
+	// 전역 템플릿 디렉토리 확인
+	globalAgentsDir := config.GlobalAgentsDir()
+
+	if _, err := os.Stat(globalAgentsDir); os.IsNotExist(err) {
+		return fmt.Errorf("전역 에이전트가 설치되지 않았습니다. 'pal install' 실행하세요")
+	}
+
+	// 템플릿 스캨
+	var templates []map[string]string
+
+	err := filepath.Walk(globalAgentsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		ext := filepath.Ext(path)
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(globalAgentsDir, path)
+		name := strings.TrimSuffix(relPath, ext)
+
+		templates = append(templates, map[string]string{
+			"name": name,
+			"path": relPath,
+		})
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("템플릿 스캨 실패: %w", err)
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(templates)
+	}
+
+	fmt.Println("📋 사용 가능한 에이전트 템플릿")
+	fmt.Println()
+	fmt.Printf("위치: %s\n", globalAgentsDir)
+	fmt.Println()
+
+	// 카테고리별 그룹화
+	coreTemplates := []string{}
+	backendTemplates := []string{}
+	frontendTemplates := []string{}
+
+	for _, t := range templates {
+		name := t["name"]
+		if strings.HasPrefix(name, "core/") {
+			coreTemplates = append(coreTemplates, strings.TrimPrefix(name, "core/"))
+		} else if strings.HasPrefix(name, "workers/backend/") {
+			backendTemplates = append(backendTemplates, strings.TrimPrefix(name, "workers/backend/"))
+		} else if strings.HasPrefix(name, "workers/frontend/") {
+			frontendTemplates = append(frontendTemplates, strings.TrimPrefix(name, "workers/frontend/"))
+		}
+	}
+
+	fmt.Println("🏛️  Core 에이전트:")
+	for _, name := range coreTemplates {
+		fmt.Printf("   - core/%s\n", name)
+	}
+	fmt.Println()
+
+	fmt.Println("⚙️  Backend 워커:")
+	for _, name := range backendTemplates {
+		fmt.Printf("   - workers/backend/%s\n", name)
+	}
+	fmt.Println()
+
+	fmt.Println("🎨 Frontend 워커:")
+	for _, name := range frontendTemplates {
+		fmt.Printf("   - workers/frontend/%s\n", name)
+	}
+	fmt.Println()
+
+	fmt.Println("💡 프로젝트에 추가:")
+	fmt.Println("   pal agent add core/collaborator")
+	fmt.Println("   pal agent add workers/backend/go")
+
+	return nil
+}
+
+func runAgentAdd(cmd *cobra.Command, args []string) error {
+	templateName := args[0]
+
+	// 프로젝트 루트 찾기
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL Kit 프로젝트를 찾을 수 없습니다")
+	}
+
+	// 전역 템플릿 경로
+	globalAgentsDir := config.GlobalAgentsDir()
+
+	// 템플릿 파일 찾기
+	var templatePath string
+	possiblePaths := []string{
+		filepath.Join(globalAgentsDir, templateName+".yaml"),
+		filepath.Join(globalAgentsDir, templateName+".yml"),
+		filepath.Join(globalAgentsDir, templateName),
+	}
+
+	for _, p := range possiblePaths {
+		if _, err := os.Stat(p); err == nil {
+			templatePath = p
+			break
+		}
+	}
+
+	if templatePath == "" {
+		return fmt.Errorf("템플릿을 찾을 수 없습니다: %s\n사용 가능한 템플릿: pal agent templates", templateName)
+	}
+
+	// 템플릿 내용 읽기
+	content, err := os.ReadFile(templatePath)
+	if err != nil {
+		return fmt.Errorf("템플릿 읽기 실패: %w", err)
+	}
+
+	// 대상 파일 경로 결정
+	// workers/backend/go.yaml → agents/worker-go.yaml
+	// core/builder.yaml → agents/builder.yaml
+	baseName := filepath.Base(templatePath)
+	ext := filepath.Ext(baseName)
+	name := strings.TrimSuffix(baseName, ext)
+
+	dir := filepath.Dir(templatePath)
+	relDir, _ := filepath.Rel(globalAgentsDir, dir)
+
+	var targetName string
+	if relDir == "core" {
+		targetName = name + ext
+	} else if strings.Contains(relDir, "backend") || strings.Contains(relDir, "frontend") {
+		targetName = "worker-" + name + ext
+	} else {
+		targetName = name + ext
+	}
+
+	// agents 디렉토리 생성
+	agentsDir := filepath.Join(projectRoot, "agents")
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return fmt.Errorf("디렉토리 생성 실패: %w", err)
+	}
+
+	targetPath := filepath.Join(agentsDir, targetName)
+
+	// 이미 존재하는지 확인
+	if _, err := os.Stat(targetPath); err == nil {
+		return fmt.Errorf("에이전트가 이미 존재합니다: %s", targetPath)
+	}
+
+	// 파일 쓰기
+	if err := os.WriteFile(targetPath, content, 0644); err != nil {
+		return fmt.Errorf("파일 작성 실패: %w", err)
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"status":   "added",
+			"template": templateName,
+			"path":     targetPath,
+		})
+	}
+
+	fmt.Printf("✅ 에이전트 추가: %s\n", targetName)
+	fmt.Printf("   파일: %s\n", targetPath)
+	fmt.Println()
+	fmt.Println("💡 에이전트 확인:")
+	fmt.Printf("   pal agent show %s\n", strings.TrimSuffix(targetName, ext))
 
 	return nil
 }

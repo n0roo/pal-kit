@@ -1,0 +1,87 @@
+id: pal-kit
+name: PAL Kit 프로젝트 컨벤션
+type: project
+description: PAL Kit 개발 관련 규칙 및 패턴
+enabled: true
+priority: 5
+
+rules:
+  - id: cli-pattern
+    description: CLI 명령어 구현 패턴
+    severity: info
+    details: |
+      1. internal/cli/{command}.go 에 명령어 정의
+      2. Cobra 사용, rootCmd.AddCommand()로 등록
+      3. runXxx 함수로 실행 로직 분리
+      4. --json 플래그 지원 (jsonOut 변수)
+      5. 한글 사용자 메시지, 영어 에러 메시지
+    examples:
+      good:
+        - |
+          var xxxCmd = &cobra.Command{
+              Use:   "xxx",
+              Short: "한글 설명",
+              RunE:  runXxx,
+          }
+          
+          func init() {
+              rootCmd.AddCommand(xxxCmd)
+          }
+          
+          func runXxx(cmd *cobra.Command, args []string) error {
+              // 구현
+          }
+
+  - id: service-pattern
+    description: 서비스 레이어 패턴
+    severity: info
+    details: |
+      1. internal/{domain}/{domain}.go 에 서비스 정의
+      2. Service 구조체 + NewService 생성자
+      3. DB 의존성 주입
+      4. 에러는 fmt.Errorf로 래핑
+    examples:
+      good:
+        - |
+          type Service struct {
+              db *db.DB
+          }
+          
+          func NewService(database *db.DB) *Service {
+              return &Service{db: database}
+          }
+
+  - id: db-migration
+    description: DB 스키마 마이그레이션 규칙
+    severity: warning
+    details: |
+      1. schemaVersion 상수 증가
+      2. schemaVX 상수로 새 테이블/인덱스 정의
+      3. migrate() 함수에 ALTER TABLE 추가
+      4. Init()에서 schemaVX 실행
+
+  - id: hook-pattern
+    description: Hook 구현 패턴
+    severity: info
+    details: |
+      1. stdin에서 JSON 읽기 (readHookInput)
+      2. 전역 DB 사용 (GetDBPath)
+      3. 프로젝트 루트 감지 (config.FindProjectRoot)
+      4. 이벤트 로깅 (sessionSvc.LogEvent)
+
+  - id: api-pattern
+    description: WebUI API 패턴
+    severity: info
+    details: |
+      1. /api/{resource} 엔드포인트
+      2. handleXxx 핸들러 함수
+      3. s.withCORS 래퍼 사용
+      4. s.jsonResponse / s.errorResponse
+
+  - id: testing
+    description: 테스트 요구사항
+    severity: warning
+    details: |
+      - 새 기능에는 테스트 작성 권장
+      - internal/{pkg}/{pkg}_test.go
+      - 테이블 드리븐 테스트 선호

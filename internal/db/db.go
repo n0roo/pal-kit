@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 2
+const schemaVersion = 5
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -123,6 +123,81 @@ CREATE TABLE IF NOT EXISTS port_dependencies (
 );
 `
 
+// v3 추가 테이블
+const schemaV3 = `
+-- 세션 이벤트 (히스토리)
+CREATE TABLE IF NOT EXISTS session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at);
+`
+
+// v4 추가 테이블 (전역 구조)
+const schemaV4 = `
+-- 등록된 프로젝트
+CREATE TABLE IF NOT EXISTS projects (
+    root TEXT PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    last_active DATETIME,
+    session_count INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_active ON projects(last_active);
+CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
+
+-- sessions에 프로젝트 인덱스
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_root);
+`
+
+// v5 추가 테이블 (Manifest 시스템)
+const schemaV5 = `
+-- 파일 Manifest (프로젝트별 파일 추적)
+CREATE TABLE IF NOT EXISTS file_manifests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_root TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    size INTEGER DEFAULT 0,
+    mtime DATETIME,
+    managed_by TEXT DEFAULT 'pal',
+    status TEXT DEFAULT 'synced',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_root, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_manifests_project ON file_manifests(project_root);
+CREATE INDEX IF NOT EXISTS idx_manifests_status ON file_manifests(project_root, status);
+CREATE INDEX IF NOT EXISTS idx_manifests_type ON file_manifests(project_root, file_type);
+
+-- 파일 변경 히스토리 (대시보드용)
+CREATE TABLE IF NOT EXISTS file_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_root TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    old_hash TEXT,
+    new_hash TEXT,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    session_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_changes_project ON file_changes(project_root, changed_at);
+CREATE INDEX IF NOT EXISTS idx_changes_session ON file_changes(session_id);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -147,7 +222,15 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("DB 연결 실패: %w", err)
 	}
 
-	return &DB{DB: db, path: path}, nil
+	d := &DB{DB: db, path: path}
+
+	// 스키마 자동 초기화
+	if err := d.Init(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("스키마 초기화 실패: %w", err)
+	}
+
+	return d, nil
 }
 
 // Init initializes the database schema
@@ -167,7 +250,22 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v2 스키마 적용 실패: %w", err)
 	}
 
-	// 4. 버전 저장
+	// 4. v3 테이블 적용
+	if _, err := d.Exec(schemaV3); err != nil {
+		return fmt.Errorf("v3 스키마 적용 실패: %w", err)
+	}
+
+	// 5. v4 테이블 적용
+	if _, err := d.Exec(schemaV4); err != nil {
+		return fmt.Errorf("v4 스키마 적용 실패: %w", err)
+	}
+
+	// 6. v5 테이블 적용 (Manifest)
+	if _, err := d.Exec(schemaV5); err != nil {
+		return fmt.Errorf("v5 스키마 적용 실패: %w", err)
+	}
+
+	// 7. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)
@@ -186,6 +284,18 @@ func (d *DB) migrate() error {
 		d.Exec(`ALTER TABLE sessions ADD COLUMN session_type TEXT DEFAULT 'single'`)
 		d.Exec(`ALTER TABLE sessions ADD COLUMN parent_session TEXT`)
 	}
+
+	// v2 -> v3: 프로젝트 정보 및 Claude 세션 ID 추가
+	if currentVersion < 3 {
+		d.Exec(`ALTER TABLE sessions ADD COLUMN claude_session_id TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN project_root TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN project_name TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN transcript_path TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT`)
+	}
+
+	// v3 -> v4: projects 테이블은 schemaV4에서 생성
+	// 추가 마이그레이션 필요 시 여기에 추가
 
 	return nil
 }

@@ -19,6 +19,7 @@
         <nav class="nav">
             <button class="nav-btn active" data-tab="status">Overview</button>
             <button class="nav-btn" data-tab="sessions">Sessions</button>
+            <button class="nav-btn" data-tab="history">History</button>
             <button class="nav-btn" data-tab="ports">Ports</button>
             <button class="nav-btn" data-tab="pipelines">Pipelines</button>
             <button class="nav-btn" data-tab="docs">Documents</button>
@@ -29,12 +30,20 @@
         <main class="main">
             <!-- Status Tab -->
             <section id="tab-status" class="tab-content active">
+                <h2>Overview</h2>
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-icon">📍</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-sessions-active">-</div>
                             <div class="stat-label">Active Sessions</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-sessions-completed">-</div>
+                            <div class="stat-label">Completed Sessions</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -52,24 +61,24 @@
                         </div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-icon">📚</div>
+                        <div class="stat-icon">🔢</div>
                         <div class="stat-info">
-                            <div class="stat-value" id="stat-docs-total">-</div>
-                            <div class="stat-label">Documents</div>
+                            <div class="stat-value" id="stat-total-tokens">-</div>
+                            <div class="stat-label">Total Tokens</div>
+                        </div>
+                    </div>
+                    <div class="stat-card highlight">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-total-cost">-</div>
+                            <div class="stat-label">Total Cost (USD)</div>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-icon">📋</div>
+                        <div class="stat-icon">⏱️</div>
                         <div class="stat-info">
-                            <div class="stat-value" id="stat-conventions-enabled">-</div>
-                            <div class="stat-label">Enabled Conventions</div>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">🔒</div>
-                        <div class="stat-info">
-                            <div class="stat-value" id="stat-locks-active">-</div>
-                            <div class="stat-label">Active Locks</div>
+                            <div class="stat-value" id="stat-total-duration">-</div>
+                            <div class="stat-label">Total Time</div>
                         </div>
                     </div>
                     <div class="stat-card warning">
@@ -92,11 +101,35 @@
                                 <th>Status</th>
                                 <th>ID</th>
                                 <th>Title</th>
-                                <th>Port</th>
-                                <th>Started</th>
+                                <th>Type</th>
+                                <th>Duration</th>
+                                <th>Tokens</th>
+                                <th>Cost</th>
+                                <th>Children</th>
                             </tr>
                         </thead>
                         <tbody id="sessions-table"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- History Tab -->
+            <section id="tab-history" class="tab-content">
+                <h2>Session History</h2>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Sessions</th>
+                                <th>Completed</th>
+                                <th>Input Tokens</th>
+                                <th>Output Tokens</th>
+                                <th>Duration</th>
+                                <th>Cost (USD)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-table"></tbody>
                     </table>
                 </div>
             </section>
@@ -111,7 +144,7 @@
                                 <th>Status</th>
                                 <th>ID</th>
                                 <th>Title</th>
-                                <th>Pipeline</th>
+                                <th>Session</th>
                                 <th>Created</th>
                             </tr>
                         </thead>
@@ -185,9 +218,21 @@
         </main>
 
         <footer class="footer">
-            <span>PAL Kit v0.2.5</span>
+            <span>PAL Kit v0.3.0</span>
             <span id="project-root" class="muted"></span>
         </footer>
+    </div>
+
+    <!-- Session Detail Modal -->
+    <div id="session-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Session Detail</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="session-modal-body">
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>

@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"fmt"
-	"os"
-
+	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -21,12 +19,15 @@ var rootCmd = &cobra.Command{
 에이전트가 컨벤션을 준수하고 작업 품질을 유지하도록 지원합니다.
 
 주요 기능:
-  - Lock 관리: 리소스 동시 접근 제어
+  - 전역 대시보드: 모든 프로젝트 세션 통합 조회
   - 세션 관리: 작업 세션 상태 추적
   - 포트 관리: 작업 단위 관리
   - 토큰 사용량: Claude 사용량 추적
-  - Hook 지원: Claude Code Hook 연동`,
-	Version: "0.1.0",
+  - Hook 지원: Claude Code Hook 연동
+
+전역 설치: pal install
+프로젝트 초기화: pal init`,
+	Version: "0.2.0",
 }
 
 func Execute() error {
@@ -34,23 +35,22 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "SQLite DB 경로 (기본: .claude/pal.db)")
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "SQLite DB 경로 (기본: ~/.pal/pal.db)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "상세 출력")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "JSON 출력")
 }
 
-// GetDBPath returns the database path
+// GetDBPath returns the database path (global by default)
 func GetDBPath() string {
 	if dbPath != "" {
 		return dbPath
 	}
-	
-	// 기본 경로: .claude/pal.db
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ".claude/pal.db"
-	}
-	return fmt.Sprintf("%s/.claude/pal.db", cwd)
+	return config.GlobalDBPath()
+}
+
+// GetProjectRoot returns the current project root
+func GetProjectRoot() string {
+	return config.FindProjectRoot()
 }
 
 // IsVerbose returns verbose flag

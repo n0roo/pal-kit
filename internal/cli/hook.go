@@ -5,23 +5,62 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/google/uuid"
+	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/lock"
+	"github.com/n0roo/pal-kit/internal/manifest"
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/rules"
 	"github.com/n0roo/pal-kit/internal/session"
+	"github.com/n0roo/pal-kit/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
 // HookInput represents the JSON input from Claude Code hooks
+// Based on Claude Code Hook specification
 type HookInput struct {
-	SessionID     string                 `json:"session_id"`
-	ToolName      string                 `json:"tool_name"`
-	ToolInput     map[string]interface{} `json:"tool_input"`
-	HookEventName string                 `json:"hook_event_name"`
+	// Common fields
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Cwd            string `json:"cwd"`
+	PermissionMode string `json:"permission_mode"`
+	HookEventName  string `json:"hook_event_name"`
+
+	// SessionStart specific
+	Source string `json:"source,omitempty"` // "startup"
+
+	// SessionEnd specific
+	Reason string `json:"reason,omitempty"` // "exit", "clear", "logout", "prompt_input_exit", "other"
+
+	// Stop/SubagentStop specific
+	StopHookActive bool `json:"stop_hook_active,omitempty"`
+
+	// PreToolUse/PostToolUse specific
+	ToolName     string                 `json:"tool_name,omitempty"`
+	ToolInput    map[string]interface{} `json:"tool_input,omitempty"`
+	ToolResponse map[string]interface{} `json:"tool_response,omitempty"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+
+	// PreCompact specific
+	Trigger            string `json:"trigger,omitempty"` // "manual" or "auto"
+	CustomInstructions string `json:"custom_instructions,omitempty"`
+
+	// Notification specific
+	Message          string `json:"message,omitempty"`
+	NotificationType string `json:"notification_type,omitempty"`
+}
+
+// HookOutput represents JSON output for hook responses
+type HookOutput struct {
+	Decision   string                 `json:"decision,omitempty"` // "approve", "block", "allow", "deny", "ask"
+	Reason     string                 `json:"reason,omitempty"`
+	Continue   bool                   `json:"continue,omitempty"`
+	StopReason string                 `json:"stopReason,omitempty"`
+	HookOutput map[string]interface{} `json:"hookSpecificOutput,omitempty"`
 }
 
 var (
@@ -136,6 +175,12 @@ func init() {
 }
 
 func readHookInput() (*HookInput, error) {
+	// stdin이 터미널이면 (파이프가 아니면) 빈 입력 반환
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		return &HookInput{}, nil
+	}
+
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		return nil, err
@@ -168,25 +213,39 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 	sessionSvc := session.NewService(database)
 	portSvc := port.NewService(database)
 
-	// 세션 ID 결정
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = os.Getenv("CLAUDE_SESSION_ID")
+	// 프로젝트 루트 찾기
+	cwd := input.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
 	}
-	if sessionID == "" {
-		sessionID = uuid.New().String()[:8]
+	projectRoot := context.FindProjectRoot(cwd)
+
+	// 프로젝트 이름 추출 (디렉토리 이름)
+	projectName := ""
+	if projectRoot != "" {
+		projectName = filepath.Base(projectRoot)
 	}
 
-	// 세션 시작
-	if err := sessionSvc.Start(sessionID, hookPortID, ""); err != nil {
+	// PAL 세션 ID 생성 (Claude 세션 ID와 별도)
+	palSessionID := uuid.New().String()[:8]
+
+	// 세션 시작 (프로젝트 정보 포함)
+	opts := session.StartOptions{
+		ID:              palSessionID,
+		PortID:          hookPortID,
+		SessionType:     session.TypeSingle,
+		ClaudeSessionID: input.SessionID, // Claude Code의 session_id
+		ProjectRoot:     projectRoot,
+		ProjectName:     projectName,
+		TranscriptPath:  input.TranscriptPath,
+		Cwd:             cwd,
+	}
+
+	if err := sessionSvc.StartWithFullOptions(opts); err != nil {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "세션 시작: %v\n", err)
 		}
 	}
-
-	// 프로젝트 루트 찾기
-	cwd, _ := os.Getwd()
-	projectRoot := context.FindProjectRoot(cwd)
 
 	// CLAUDE.md에 컨텍스트 주입
 	ctxSvc := context.NewService(database)
@@ -216,6 +275,9 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 			rulesSvc.ActivatePortWithSpec(hookPortID, title, specPath, nil)
 			portSvc.UpdateStatus(hookPortID, "running")
 			
+			// 포트 시작 이벤트 로깅
+			sessionSvc.LogEvent(palSessionID, "port_start", fmt.Sprintf(`{"port_id":"%s"}`, hookPortID))
+			
 			if verbose {
 				fmt.Printf("✅ Port activated: %s\n", hookPortID)
 			}
@@ -224,11 +286,38 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 
 	// 현재 상태 요약
 	if verbose {
+		fmt.Printf("🚀 Session started: %s (claude: %s)\n", palSessionID, input.SessionID)
+		fmt.Printf("   Project: %s\n", projectName)
+		
 		runningPorts, _ := portSvc.List("running", 10)
 		if len(runningPorts) > 0 {
 			fmt.Printf("🔄 Running ports: %d\n", len(runningPorts))
 			for _, p := range runningPorts {
 				fmt.Printf("   - %s\n", p.ID)
+			}
+		}
+	}
+
+	// Manifest 변경 감지 (가벼운 알림)
+	if projectRoot != "" && config.IsInstalled() {
+		manifestSvc := manifest.NewService(database, projectRoot)
+		changedFiles, err := manifestSvc.QuickCheck()
+		if err == nil && len(changedFiles) > 0 {
+			fmt.Printf("💡 설정 파일이 변경되었습니다. `pal manifest status`로 확인해보세요.\n")
+		}
+	}
+
+	// 워크플로우 컨텍스트 주입 (rules 파일로)
+	if projectRoot != "" {
+		workflowSvc := workflow.NewService(projectRoot)
+		ctx, err := workflowSvc.GetContext()
+		if err == nil {
+			if err := workflowSvc.WriteRulesFile(ctx); err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "워크플로우 rules 작성 실패: %v\n", err)
+				}
+			} else if verbose {
+				fmt.Printf("📝 Workflow context: %s (%s)\n", ctx.WorkflowType, workflowSvc.GetRulesPath())
 			}
 		}
 	}
@@ -251,30 +340,54 @@ func runHookSessionEnd(cmd *cobra.Command, args []string) error {
 	sessionSvc := session.NewService(database)
 	lockSvc := lock.NewService(database)
 
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = os.Getenv("CLAUDE_SESSION_ID")
+	// Claude 세션 ID로 PAL 세션 찾기
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
 	}
 
-	if sessionID != "" {
-		// 세션 종료
-		sessionSvc.End(sessionID)
+	// 프로젝트 루트 찾기
+	cwd := input.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	projectRoot := context.FindProjectRoot(cwd)
 
-		// 해당 세션의 Lock 해제
-		locks, _ := lockSvc.List()
-		releasedCount := 0
-		for _, l := range locks {
-			if l.SessionID == sessionID {
-				lockSvc.Release(l.Resource)
-				releasedCount++
-			}
-		}
+	// 워크플로우 rules 파일 정리
+	if projectRoot != "" {
+		workflowSvc := workflow.NewService(projectRoot)
+		workflowSvc.CleanupRulesFile()
+	}
 
-		if verbose {
-			fmt.Printf("✓ Session ended: %s\n", sessionID)
-			if releasedCount > 0 {
-				fmt.Printf("  Released %d locks\n", releasedCount)
+	if claudeSessionID != "" {
+		// Claude 세션 ID로 PAL 세션 찾기
+		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
+		if err == nil && palSession != nil {
+			// 종료 사유와 함께 세션 종료
+			reason := input.Reason
+			if reason == "" {
+				reason = "exit"
 			}
+			sessionSvc.EndWithReason(palSession.ID, reason)
+
+			// 해당 세션의 Lock 해제
+			locks, _ := lockSvc.List()
+			releasedCount := 0
+			for _, l := range locks {
+				if l.SessionID == palSession.ID {
+					lockSvc.Release(l.Resource)
+					releasedCount++
+				}
+			}
+
+			if verbose {
+				fmt.Printf("✓ Session ended: %s (reason: %s)\n", palSession.ID, reason)
+				if releasedCount > 0 {
+					fmt.Printf("  Released %d locks\n", releasedCount)
+				}
+			}
+		} else if verbose {
+			fmt.Printf("⚠️  No PAL session found for Claude session: %s\n", claudeSessionID)
 		}
 	}
 
@@ -344,18 +457,29 @@ func runHookPreCompact(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
-	svc := session.NewService(database)
+	sessionSvc := session.NewService(database)
 
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = os.Getenv("CLAUDE_SESSION_ID")
+	// Claude 세션 ID로 PAL 세션 찾기
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
 	}
 
-	if sessionID != "" {
-		svc.IncrementCompact(sessionID)
+	if claudeSessionID != "" {
+		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
+		if err == nil && palSession != nil {
+			sessionSvc.IncrementCompact(palSession.ID)
+			
+			// 컴팩트 이벤트 로깅
+			trigger := input.Trigger
+			if trigger == "" {
+				trigger = "auto"
+			}
+			sessionSvc.LogEvent(palSession.ID, "compact", fmt.Sprintf(`{"trigger":"%s"}`, trigger))
 
-		if verbose {
-			fmt.Printf("📦 PreCompact: session=%s\n", sessionID)
+			if verbose {
+				fmt.Printf("📦 PreCompact: session=%s, trigger=%s\n", palSession.ID, trigger)
+			}
 		}
 	}
 
