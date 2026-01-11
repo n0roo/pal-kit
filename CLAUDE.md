@@ -1,102 +1,88 @@
-# PAL Kit
+# pal-kit
 
-> Personal Agentic Layer - Claude Code 에이전트 오케스트레이션 CLI 도구
+> PAL Kit 관리 프로젝트 | 생성일: 2026-01-12
 
-## 프로젝트 개요
+---
 
-PAL Kit은 Claude Code와 함께 사용하여 복잡한 작업을 체계적으로 관리하는 CLI 도구입니다.
+## 🚀 PAL Kit 초기 설정 필요
 
-- **버전**: v0.3.0
-- **언어**: Go 1.22
-- **DB**: SQLite (`~/.pal/pal.db`)
-- **CLI**: Cobra
+이 프로젝트는 **PAL Kit 환경이 구성되지 않았습니다.**
 
-## 핵심 기능
+### Claude에게 요청하세요:
 
-| 기능 | 명령어 |
-|------|--------|
-| 전역 설치 | `pal install` |
-| 설치 확인 | `pal doctor` |
-| 프로젝트 초기화 | `pal init` |
-| 세션 관리 | `pal session` |
-| 포트 관리 | `pal port` |
-| 파이프라인 | `pal pipeline` |
-| 대시보드 | `pal serve` |
-| Hook | `pal hook` |
+```
+이 프로젝트의 PAL Kit 환경을 설정해줘
+```
+
+### 설정 과정:
+
+1. **프로젝트 분석** - 기술 스택, 구조 파악
+2. **워크플로우 선택** - simple / single / integrate / multi
+3. **에이전트 구성** - 워크플로우에 맞는 에이전트 설정
+4. **컨벤션 정의** - 프로젝트 규칙 설정
+
+---
+
+## 워크플로우 타입 안내
+
+| 타입 | 설명 | 적합한 경우 |
+|------|------|------------|
+| **simple** | 대화형 협업, 종합 에이전트 | 간단한 작업, 학습 |
+| **single** | 단일 세션, 역할 전환 | 중간 규모 기능 |
+| **integrate** | 빌더 관리, 서브세션 | 복잡한 기능, 여러 기술 |
+| **multi** | 복수 integrate | 대규모 프로젝트 |
+
+---
+
+## PAL Kit 기본 명령어
+
+```bash
+# 상태 확인
+pal status
+
+# 포트 관리
+pal port list
+pal port create <id> --title "작업명"
+
+# 작업 시작/종료
+pal hook port-start <id>
+pal hook port-end <id>
+
+# 파이프라인
+pal pipeline list
+pal pl plan <n>
+
+# 대시보드
+pal serve
+```
+
+---
 
 ## 디렉토리 구조
 
 ```
 .
-├── cmd/pal/           # 메인 엔트리포인트
-├── internal/
-│   ├── cli/           # CLI 명령어 (Cobra)
-│   ├── config/        # 경로 설정
-│   ├── db/            # DB 스키마 (v4)
-│   ├── session/       # 세션 서비스
-│   ├── port/          # 포트 서비스
-│   ├── pipeline/      # 파이프라인 서비스
-│   ├── server/        # WebUI API
-│   ├── usage/         # 토큰 추적
-│   └── ...
-├── agents/            # 프로젝트 에이전트
-├── conventions/       # 프로젝트 컨벤션
-├── ports/             # 포트 명세
-└── .claude/           # Claude Code 설정
-    └── settings.json  # Hook 설정
+├── CLAUDE.md           # 이 파일 (프로젝트 컨텍스트)
+├── agents/             # 에이전트 정의
+├── ports/              # 포트 명세
+├── conventions/        # 컨벤션 문서
+├── .claude/
+│   ├── settings.json   # Claude Code Hook 설정
+│   └── rules/          # 조건부 규칙
+└── .pal/
+    └── config.yaml     # PAL Kit 설정 (설정 후 생성)
 ```
 
-## 빌드 & 테스트
+---
 
-```bash
-# 빌드
-go build -o pal ./cmd/pal
-
-# 테스트
-go test ./...
-
-# 도움말
-./pal --help
-```
-
-## 개발 규칙
-
-### CLI 명령어 추가
-1. `internal/cli/{command}.go` 생성
-2. Cobra 명령어 정의
-3. `rootCmd.AddCommand()` 등록
-4. `--json` 플래그 지원
-
-### 서비스 추가
-1. `internal/{domain}/{domain}.go` 생성
-2. `Service` 구조체 + `NewService` 생성자
-3. DB 의존성 주입
-
-### DB 스키마 변경
-1. `internal/db/db.go` 수정
-2. `schemaVersion` 상수 증가
-3. `schemaVX` 상수로 새 테이블 정의
-4. `migrate()` 함수에 ALTER 추가
-
-## 컨벤션
-
-- [Go 스타일](conventions/go-style.yaml)
-- [PAL Kit 패턴](conventions/pal-kit.yaml)
-
-## 에이전트
-
-- [PAL Developer](agents/pal-developer.yaml) - 개발 작업용
-
-## 자주 쓰는 명령어
-
-```bash
-./pal doctor              # 설치 상태 확인
-./pal status              # 통합 상태 조회
-./pal serve               # 대시보드 (localhost:8080)
-./pal session list        # 세션 목록
-./pal port list           # 포트 목록
-```
-
-<!-- pal:context:start -->
-<!-- PAL Kit이 자동으로 업데이트합니다 -->
-<!-- pal:context:end -->
+<!-- pal:config:status=pending -->
+<!-- 
+  PAL Kit 설정 상태: 미완료
+  설정 완료 후 이 섹션이 업데이트됩니다.
+  
+  설정 완료 시 포함될 내용:
+  - 선택된 워크플로우 타입
+  - 구성된 에이전트 목록
+  - 적용된 컨벤션
+  - 작업 시작 가이드
+-->
