@@ -482,6 +482,133 @@ body {
     background: var(--secondary);
 }
 
+/* Timeline */
+.timeline-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 1.5rem 0 1rem;
+}
+
+.timeline-header-row h4 {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+}
+
+.timeline-header-row select {
+    padding: 0.4rem 0.75rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.timeline-header-row select:hover {
+    border-color: var(--primary);
+}
+
+.timeline-header-row select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.timeline {
+    position: relative;
+    padding-left: 1.5rem;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 0.5rem;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+}
+
+.timeline-item {
+    position: relative;
+    padding-bottom: 1rem;
+}
+
+.timeline-item:last-child {
+    padding-bottom: 0;
+}
+
+.timeline-marker {
+    position: absolute;
+    left: -1.25rem;
+    top: 0.25rem;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    border: 2px solid var(--bg);
+}
+
+.timeline-marker.start {
+    background: var(--secondary);
+}
+
+.timeline-marker.end {
+    background: var(--primary);
+}
+
+.timeline-marker.compact {
+    background: var(--warning, #f59e0b);
+}
+
+.timeline-marker.tool {
+    background: var(--info, #3b82f6);
+}
+
+.timeline-marker.info {
+    background: var(--text-muted);
+}
+
+.timeline-content {
+    background: var(--bg-hover);
+    padding: 0.75rem;
+    border-radius: var(--radius);
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.event-type {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.event-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.event-data {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.event-kv {
+    display: inline-block;
+    margin-right: 0.75rem;
+}
+
+.event-kv strong {
+    color: var(--text);
+}
+
 @media (max-width: 600px) {
     .detail-grid {
         grid-template-columns: repeat(2, 1fr);

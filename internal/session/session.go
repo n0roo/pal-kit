@@ -194,19 +194,27 @@ func (s *Service) LogEvent(sessionID, eventType, eventData string) error {
 	return err
 }
 
-// GetEvents returns events for a session
-func (s *Service) GetEvents(sessionID string, limit int) ([]SessionEvent, error) {
+// GetEvents returns events for a session with optional type filter
+func (s *Service) GetEvents(sessionID string, eventType string, limit int) ([]SessionEvent, error) {
+	var args []interface{}
 	query := `
 		SELECT id, session_id, event_type, COALESCE(event_data, ''), created_at
 		FROM session_events
-		WHERE session_id = ?
-		ORDER BY created_at DESC
-	`
+		WHERE session_id = ?`
+	args = append(args, sessionID)
+
+	if eventType != "" {
+		query += ` AND event_type = ?`
+		args = append(args, eventType)
+	}
+
+	query += ` ORDER BY created_at DESC`
+
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := s.db.Query(query, sessionID)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

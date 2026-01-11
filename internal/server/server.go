@@ -52,6 +52,7 @@ func (s *Server) Start() error {
 
 	// API routes
 	mux.HandleFunc("/api/status", s.withCORS(s.handleStatus))
+	mux.HandleFunc("/api/projects", s.withCORS(s.handleProjects))
 	mux.HandleFunc("/api/sessions", s.withCORS(s.handleSessions))
 	mux.HandleFunc("/api/sessions/stats", s.withCORS(s.handleSessionStats))
 	mux.HandleFunc("/api/sessions/history", s.withCORS(s.handleSessionHistory))
@@ -284,15 +285,20 @@ func (s *Server) handleSessionHistory(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, history)
 }
 
-// handleSessionDetail returns single session detail
+// handleSessionDetail returns single session detail or events
 func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
-	// Extract session ID from path: /api/sessions/{id}
+	// Extract session ID from path: /api/sessions/{id} or /api/sessions/{id}/events
 	path := r.URL.Path
-	id := strings.TrimPrefix(path, "/api/sessions/")
-	if id == "" || id == "stats" || id == "history" {
+	trimmed := strings.TrimPrefix(path, "/api/sessions/")
+	if trimmed == "" || trimmed == "stats" || trimmed == "history" {
 		s.errorResponse(w, 400, "session ID required")
 		return
 	}
+
+	// Check if requesting events
+	parts := strings.Split(trimmed, "/")
+	id := parts[0]
+	isEventsRequest := len(parts) > 1 && parts[1] == "events"
 
 	database, err := s.getDB()
 	if err != nil {
@@ -302,6 +308,30 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	defer database.Close()
 
 	svc := session.NewService(database)
+
+	if isEventsRequest {
+		// Handle events request
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		// Optional type filter
+		eventType := r.URL.Query().Get("type")
+
+		events, err := svc.GetEvents(id, eventType, limit)
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+
+		s.jsonResponse(w, toSessionEventDTOs(events))
+		return
+	}
+
+	// Handle session detail request
 	detail, err := svc.GetDetail(id)
 	if err != nil {
 		s.errorResponse(w, 404, err.Error())
@@ -411,6 +441,57 @@ func (s *Server) handleLocks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.jsonResponse(w, toLockDTOs(locks))
+}
+
+// handleProjects returns registered projects list
+func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	rows, err := database.Query(`
+		SELECT root, name, description, last_active, session_count, total_tokens, total_cost, created_at
+		FROM projects
+		ORDER BY last_active DESC
+	`)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	var projects []map[string]interface{}
+	for rows.Next() {
+		var root, name string
+		var description, lastActive, createdAt *string
+		var sessionCount, totalTokens int64
+		var totalCost float64
+
+		if err := rows.Scan(&root, &name, &description, &lastActive, &sessionCount, &totalTokens, &totalCost, &createdAt); err != nil {
+			continue
+		}
+
+		project := map[string]interface{}{
+			"root":          root,
+			"name":          name,
+			"description":   description,
+			"last_active":   lastActive,
+			"session_count": sessionCount,
+			"total_tokens":  totalTokens,
+			"total_cost":    totalCost,
+			"created_at":    createdAt,
+		}
+		projects = append(projects, project)
+	}
+
+	if projects == nil {
+		projects = []map[string]interface{}{}
+	}
+
+	s.jsonResponse(w, projects)
 }
 
 // handleEscalations returns escalation list

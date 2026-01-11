@@ -46,14 +46,30 @@ function initModal() {
     });
 }
 
-function showSessionDetail(sessionId) {
-    fetchAPI(`sessions/${sessionId}`).then(data => {
+// Current session for event filtering
+let currentSessionId = null;
+
+function showSessionDetail(sessionId, eventTypeFilter = '') {
+    currentSessionId = sessionId;
+    
+    // Build events URL with optional filter
+    let eventsUrl = `sessions/${sessionId}/events?limit=50`;
+    if (eventTypeFilter) {
+        eventsUrl += `&type=${eventTypeFilter}`;
+    }
+    
+    // Fetch both session detail and events in parallel
+    Promise.all([
+        fetchAPI(`sessions/${sessionId}`),
+        fetchAPI(eventsUrl)
+    ]).then(([data, events]) => {
         if (!data) return;
         
         const modal = document.getElementById('session-modal');
         const body = document.getElementById('session-modal-body');
         const s = data.session;
         const children = data.children || [];
+        const eventList = events || [];
         
         body.innerHTML = `
             <div class="detail-grid">
@@ -115,13 +131,41 @@ function showSessionDetail(sessionId) {
                 </div>
                 <div class="detail-item highlight">
                     <label>Cost (USD)</label>
-                    <span>$${(s.cost_usd || 0).toFixed(4)}</span>
+                    <span>\${(s.cost_usd || 0).toFixed(4)}</span>
                 </div>
                 <div class="detail-item">
                     <label>Compactions</label>
                     <span>${s.compact_count || 0}</span>
                 </div>
             </div>
+            
+            <div class="timeline-header-row">
+                <h4>Event Timeline (${eventList.length})</h4>
+                <select id="event-type-filter" onchange="filterEvents(this.value)">
+                    <option value=""${!eventTypeFilter ? ' selected' : ''}>All Events</option>
+                    <option value="session_start"${eventTypeFilter === 'session_start' ? ' selected' : ''}>🚀 Session Start</option>
+                    <option value="session_end"${eventTypeFilter === 'session_end' ? ' selected' : ''}>🏁 Session End</option>
+                    <option value="pre_compact"${eventTypeFilter === 'pre_compact' ? ' selected' : ''}>📦 Compact</option>
+                    <option value="tool_use"${eventTypeFilter === 'tool_use' ? ' selected' : ''}>🔧 Tool Use</option>
+                    <option value="notification"${eventTypeFilter === 'notification' ? ' selected' : ''}>📢 Notification</option>
+                </select>
+            </div>
+            ${eventList.length > 0 ? `
+                <div class="timeline">
+                    ${eventList.map(e => `
+                        <div class="timeline-item">
+                            <div class="timeline-marker ${getEventTypeClass(e.event_type)}"></div>
+                            <div class="timeline-content">
+                                <div class="timeline-header">
+                                    <span class="event-type">${eventTypeLabel(e.event_type)}</span>
+                                    <span class="event-time">${formatTimeAgo(e.created_at)}</span>
+                                </div>
+                                ${e.event_data ? `<div class="event-data">${formatEventData(e.event_data)}</div>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '<div class="empty-state">No events found</div>'}
             
             ${children.length > 0 ? `
                 <h4>Child Sessions (${children.length})</h4>
@@ -139,6 +183,64 @@ function showSessionDetail(sessionId) {
         
         modal.classList.remove('hidden');
     });
+}
+
+// Filter events by type
+function filterEvents(eventType) {
+    if (currentSessionId) {
+        showSessionDetail(currentSessionId, eventType);
+    }
+}
+
+// Event type helpers
+function getEventTypeClass(type) {
+    const classes = {
+        'session_start': 'start',
+        'session_end': 'end',
+        'pre_compact': 'compact',
+        'tool_use': 'tool',
+        'notification': 'info'
+    };
+    return classes[type] || 'default';
+}
+
+function eventTypeLabel(type) {
+    const labels = {
+        'session_start': '🚀 Session Start',
+        'session_end': '🏁 Session End',
+        'pre_compact': '📦 Compact',
+        'tool_use': '🔧 Tool Use',
+        'notification': '📢 Notification'
+    };
+    return labels[type] || type;
+}
+
+function formatEventData(data) {
+    try {
+        const parsed = JSON.parse(data);
+        return Object.entries(parsed)
+            .filter(([k, v]) => v !== '' && v !== null)
+            .map(([k, v]) => `<span class="event-kv"><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</span>`)
+            .join(' ');
+    } catch {
+        return escapeHtml(data);
+    }
+}
+
+function formatTimeAgo(dateStr) {
+    if (!dateStr) return '-';
+    try {
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diff = Math.floor((now - date) / 1000);
+        
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        return date.toLocaleDateString();
+    } catch {
+        return '-';
+    }
 }
 
 // Refresh

@@ -115,6 +115,36 @@ func toSessionDetailDTOs(details []session.SessionDetail) []SessionDetailDTO {
 	return result
 }
 
+// SessionEventDTO for timeline view
+type SessionEventDTO struct {
+	ID        int64  `json:"id"`
+	SessionID string `json:"session_id"`
+	EventType string `json:"event_type"`
+	EventData string `json:"event_data,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+func toSessionEventDTO(e session.SessionEvent) SessionEventDTO {
+	return SessionEventDTO{
+		ID:        e.ID,
+		SessionID: e.SessionID,
+		EventType: e.EventType,
+		EventData: e.EventData,
+		CreatedAt: e.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func toSessionEventDTOs(events []session.SessionEvent) []SessionEventDTO {
+	if events == nil {
+		return []SessionEventDTO{}
+	}
+	result := make([]SessionEventDTO, len(events))
+	for i, e := range events {
+		result[i] = toSessionEventDTO(e)
+	}
+	return result
+}
+
 // Port DTO for JSON response
 type PortDTO struct {
 	ID          string `json:"id"`

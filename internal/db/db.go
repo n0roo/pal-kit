@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -139,6 +139,27 @@ CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(event_type)
 CREATE INDEX IF NOT EXISTS idx_session_events_created ON session_events(created_at);
 `
 
+// v4 추가 테이블 (전역 구조)
+const schemaV4 = `
+-- 등록된 프로젝트
+CREATE TABLE IF NOT EXISTS projects (
+    root TEXT PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    last_active DATETIME,
+    session_count INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_active ON projects(last_active);
+CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
+
+-- sessions에 프로젝트 인덱스
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_root);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -196,7 +217,12 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v3 스키마 적용 실패: %w", err)
 	}
 
-	// 4. 버전 저장
+	// 5. v4 테이블 적용
+	if _, err := d.Exec(schemaV4); err != nil {
+		return fmt.Errorf("v4 스키마 적용 실패: %w", err)
+	}
+
+	// 6. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)
@@ -224,6 +250,9 @@ func (d *DB) migrate() error {
 		d.Exec(`ALTER TABLE sessions ADD COLUMN transcript_path TEXT`)
 		d.Exec(`ALTER TABLE sessions ADD COLUMN cwd TEXT`)
 	}
+
+	// v3 -> v4: projects 테이블은 schemaV4에서 생성
+	// 추가 마이그레이션 필요 시 여기에 추가
 
 	return nil
 }
