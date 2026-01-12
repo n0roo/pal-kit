@@ -233,10 +233,10 @@ func (s *Service) GenerateForPort(portID string) (string, error) {
 	// 실행 명령
 	sb.WriteString("## 실행 명령\n\n")
 	sb.WriteString("```bash\n")
-	sb.WriteString(fmt.Sprintf("# 작업 시작\n"))
+	sb.WriteString("# 작업 시작\n")
 	sb.WriteString(fmt.Sprintf("pal lock acquire %s\n", portID))
 	sb.WriteString(fmt.Sprintf("pal port status %s running\n\n", portID))
-	sb.WriteString(fmt.Sprintf("# 작업 완료 후\n"))
+	sb.WriteString("# 작업 완료 후\n")
 	sb.WriteString(fmt.Sprintf("pal lock release %s\n", portID))
 	sb.WriteString(fmt.Sprintf("pal port status %s complete\n", portID))
 	sb.WriteString("```\n")

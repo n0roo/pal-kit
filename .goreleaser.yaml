@@ -1,0 +1,128 @@
+# GoReleaser configuration for PAL Kit
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: pal
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: pal
+    main: ./cmd/pal
+    binary: pal
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/n0roo/pal-kit/internal/cli.Version={{.Version}}
+      - -X github.com/n0roo/pal-kit/internal/cli.Commit={{.Commit}}
+      - -X github.com/n0roo/pal-kit/internal/cli.Date={{.Date}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# macOS universal binary (amd64 + arm64)
+universal_binaries:
+  - id: pal-universal
+    ids:
+      - pal
+    replace: true
+    name_template: pal
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+      - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE*
+      - docs/*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "New Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "Performance Improvements"
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: "Other Changes"
+      order: 999
+
+release:
+  github:
+    owner: n0roo
+    name: pal-kit
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## PAL Kit {{ .Version }}
+
+    Claude Code와 함께 사용하는 프로젝트 관리 CLI 도구입니다.
+
+    ### 설치 방법
+
+    #### macOS / Linux (권장)
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/n0roo/pal-kit/main/install.sh | bash
+    ```
+
+    #### 직접 다운로드
+    아래에서 플랫폼에 맞는 바이너리를 다운로드하세요.
+
+    > **macOS 사용자**: Gatekeeper 경고 시 `xattr -d com.apple.quarantine ./pal` 실행
+  footer: |
+    ---
+    **Full Changelog**: https://github.com/n0roo/pal-kit/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Sign macOS binaries (ad-hoc signing for non-notarized builds)
+signs:
+  - cmd: codesign
+    args:
+      - "-s"
+      - "-"
+      - "-f"
+      - "${artifact}"
+    artifacts: binary
+    ids:
+      - pal
+    output: false

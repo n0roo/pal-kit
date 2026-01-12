@@ -5,6 +5,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Build information (set via ldflags)
+var (
+	Version = "0.2.0"
+	Commit  = "unknown"
+	Date    = "unknown"
+)
+
 var (
 	dbPath  string
 	verbose bool
@@ -27,7 +34,6 @@ var rootCmd = &cobra.Command{
 
 전역 설치: pal install
 프로젝트 초기화: pal init`,
-	Version: "0.2.0",
 }
 
 func Execute() error {
@@ -35,6 +41,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.Version = Version
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "SQLite DB 경로 (기본: ~/.pal/pal.db)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "상세 출력")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "JSON 출력")

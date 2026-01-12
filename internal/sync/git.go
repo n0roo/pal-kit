@@ -62,7 +62,7 @@ func (g *GitSync) HasRemote() bool {
 // GetRemote returns the configured remote URL
 func (g *GitSync) GetRemote() (string, error) {
 	if !g.IsInitialized() {
-		return "", fmt.Errorf("Git 저장소가 초기화되지 않음")
+		return "", fmt.Errorf("git 저장소가 초기화되지 않음")
 	}
 	output, err := g.runGit("remote", "get-url", "origin")
 	if err != nil {
@@ -81,7 +81,7 @@ func (g *GitSync) Init(remoteURL string) error {
 	// Initialize git if not already
 	if !g.IsInitialized() {
 		if _, err := g.runGit("init"); err != nil {
-			return fmt.Errorf("Git init 실패: %w", err)
+			return fmt.Errorf("git init 실패: %w", err)
 		}
 	}
 
@@ -134,7 +134,7 @@ func (g *GitSync) hasCommits() bool {
 // Push exports data and pushes to remote
 func (g *GitSync) Push(message string) (*PushResult, error) {
 	if !g.IsInitialized() {
-		return nil, fmt.Errorf("Git 저장소가 초기화되지 않음. 'pal sync init' 실행 필요")
+		return nil, fmt.Errorf("git 저장소가 초기화되지 않음, 'pal sync init' 실행 필요")
 	}
 
 	result := &PushResult{}
@@ -143,7 +143,7 @@ func (g *GitSync) Push(message string) (*PushResult, error) {
 	exporter := NewExporter(g.db, g.envSvc)
 	data, err := exporter.ExportAll()
 	if err != nil {
-		return nil, fmt.Errorf("Export 실패: %w", err)
+		return nil, fmt.Errorf("export 실패: %w", err)
 	}
 
 	if err := exporter.ExportToFile(g.dataFile); err != nil {
@@ -155,7 +155,7 @@ func (g *GitSync) Push(message string) (*PushResult, error) {
 	// Check for changes
 	status, err := g.runGit("status", "--porcelain")
 	if err != nil {
-		return nil, fmt.Errorf("Git status 실패: %w", err)
+		return nil, fmt.Errorf("git status 실패: %w", err)
 	}
 
 	if strings.TrimSpace(status) == "" {
@@ -177,11 +177,11 @@ func (g *GitSync) Push(message string) (*PushResult, error) {
 
 	// Add and commit
 	if _, err := g.runGit("add", "."); err != nil {
-		return nil, fmt.Errorf("Git add 실패: %w", err)
+		return nil, fmt.Errorf("git add 실패: %w", err)
 	}
 
 	if _, err := g.runGit("commit", "-m", message); err != nil {
-		return nil, fmt.Errorf("Git commit 실패: %w", err)
+		return nil, fmt.Errorf("git commit 실패: %w", err)
 	}
 
 	result.Committed = true
@@ -214,7 +214,7 @@ func (g *GitSync) Push(message string) (*PushResult, error) {
 // Pull fetches from remote and imports data
 func (g *GitSync) Pull(options ImportOptions) (*PullResult, error) {
 	if !g.IsInitialized() {
-		return nil, fmt.Errorf("Git 저장소가 초기화되지 않음. 'pal sync init' 실행 필요")
+		return nil, fmt.Errorf("git 저장소가 초기화되지 않음, 'pal sync init' 실행 필요")
 	}
 
 	result := &PullResult{}

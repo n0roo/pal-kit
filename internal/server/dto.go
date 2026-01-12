@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -307,14 +306,6 @@ func toLockDTOs(locks []lock.Lock) []LockDTO {
 		result[i] = toLockDTO(l)
 	}
 	return result
-}
-
-// Helper for nullable string
-func nullString(ns sql.NullString) string {
-	if ns.Valid {
-		return ns.String
-	}
-	return ""
 }
 
 // formatDuration formats seconds into human readable string

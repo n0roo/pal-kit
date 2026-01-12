@@ -133,9 +133,9 @@ func (s *Service) generateRuleContent(portID, title string, paths []string) stri
 	// Commands
 	sb.WriteString("## 실행 명령\n\n")
 	sb.WriteString("```bash\n")
-	sb.WriteString(fmt.Sprintf("# 상태 확인\n"))
+	sb.WriteString("# 상태 확인\n")
 	sb.WriteString(fmt.Sprintf("pal port show %s\n\n", portID))
-	sb.WriteString(fmt.Sprintf("# 완료 처리\n"))
+	sb.WriteString("# 완료 처리\n")
 	sb.WriteString(fmt.Sprintf("pal port status %s complete\n", portID))
 	sb.WriteString("```\n")
 
@@ -204,9 +204,9 @@ func (s *Service) generateRuleContentWithSpec(portID, title string, paths []stri
 	sb.WriteString("\n---\n\n")
 	sb.WriteString("## PAL 명령\n\n")
 	sb.WriteString("```bash\n")
-	sb.WriteString(fmt.Sprintf("# 포트 상태 확인\n"))
+	sb.WriteString("# 포트 상태 확인\n")
 	sb.WriteString(fmt.Sprintf("pal port show %s\n\n", portID))
-	sb.WriteString(fmt.Sprintf("# 작업 완료\n"))
+	sb.WriteString("# 작업 완료\n")
 	sb.WriteString(fmt.Sprintf("pal port status %s complete\n", portID))
 	sb.WriteString("```\n")
 

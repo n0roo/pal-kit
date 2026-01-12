@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	CurrentDBVersion  = 7
-	CurrentAppVersion = "0.2.0"
+	CurrentDBVersion = 7
 )
 
 var (
@@ -69,13 +68,13 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	checks = append(checks, CheckResult{
 		Name:    "App Version",
 		Status:  "ok",
-		Message: CurrentAppVersion,
+		Message: Version,
 	})
 
 	// 3. 설치된 바이너리 버전 확인
 	installedVersion := checkInstalledVersion()
 	if installedVersion != "" {
-		if installedVersion == CurrentAppVersion {
+		if installedVersion == Version {
 			checks = append(checks, CheckResult{
 				Name:    "Installed Binary",
 				Status:  "ok",
@@ -85,7 +84,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			checks = append(checks, CheckResult{
 				Name:    "Installed Binary",
 				Status:  "warning",
-				Message: fmt.Sprintf("%s (현재: %s) - 'pal install --bin' 또는 '--zsh'로 업데이트", installedVersion, CurrentAppVersion),
+				Message: fmt.Sprintf("%s (현재: %s) - 'pal install --bin' 또는 '--zsh'로 업데이트", installedVersion, Version),
 			})
 		}
 	} else {
@@ -108,7 +107,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checks = append(checks, CheckResult{
 			Name:    "Global Install",
 			Status:  "error",
-			Message: fmt.Sprintf("설치되지 않음 - 'pal install' 실행 필요"),
+			Message: "설치되지 않음 - 'pal install' 실행 필요",
 		})
 	}
 

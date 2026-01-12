@@ -45,7 +45,7 @@ func init() {
 func runInit(cmd *cobra.Command, args []string) error {
 	// 전역 설치 확인
 	if !config.IsInstalled() {
-		return fmt.Errorf("PAL Kit이 설치되지 않았습니다.\n먼저 'pal install' 명령을 실행하세요.")
+		return fmt.Errorf("pal kit이 설치되지 않았습니다, 먼저 'pal install' 명령을 실행하세요")
 	}
 
 	cwd, err := os.Getwd()

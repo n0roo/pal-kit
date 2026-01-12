@@ -209,7 +209,7 @@ func runSyncExport(cmd *cobra.Command, args []string) error {
 	// Export
 	data, err := exporter.ExportAll()
 	if err != nil {
-		return fmt.Errorf("Export 실패: %w", err)
+		return fmt.Errorf("export 실패: %w", err)
 	}
 
 	if IsJSON() {
@@ -270,7 +270,7 @@ func runSyncImport(cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
 	result, err := importer.ImportFromFile(inputPath)
 	if err != nil {
-		return fmt.Errorf("Import 실패: %w", err)
+		return fmt.Errorf("import 실패: %w", err)
 	}
 
 	if IsJSON() {

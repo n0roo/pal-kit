@@ -226,7 +226,7 @@ func (s *Service) GetStats() (map[string]interface{}, error) {
 
 	// Total events
 	var total int
-	s.db.QueryRow(`SELECT COUNT(*) FROM session_events`).Scan(&total)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM session_events`).Scan(&total)
 	stats["total_events"] = total
 
 	// Events by type
@@ -245,14 +245,14 @@ func (s *Service) GetStats() (map[string]interface{}, error) {
 	for rows.Next() {
 		var t string
 		var count int
-		rows.Scan(&t, &count)
+		_ = rows.Scan(&t, &count)
 		byType[t] = count
 	}
 	stats["by_type"] = byType
 
 	// Events today
 	var today int
-	s.db.QueryRow(`
+	_ = s.db.QueryRow(`
 		SELECT COUNT(*) FROM session_events
 		WHERE DATE(created_at) = DATE('now')
 	`).Scan(&today)
