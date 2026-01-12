@@ -21,13 +21,13 @@ type Tab int
 const (
 	TabStatus Tab = iota
 	TabSessions
-	TabPipelines
+	TabWorkflows
 	TabDocs
 	TabConventions
 )
 
 func (t Tab) String() string {
-	return []string{"Status", "Sessions", "Pipelines", "Docs", "Conventions"}[t]
+	return []string{"Status", "Sessions", "Workflows", "Docs", "Conventions"}[t]
 }
 
 // Model is the main TUI model
@@ -150,7 +150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "2":
 			m.currentTab = TabSessions
 		case "3":
-			m.currentTab = TabPipelines
+			m.currentTab = TabWorkflows
 		case "4":
 			m.currentTab = TabDocs
 		case "5":
@@ -214,8 +214,8 @@ func (m Model) View() string {
 		b.WriteString(m.renderStatusTab())
 	case TabSessions:
 		b.WriteString(m.renderSessionsTab())
-	case TabPipelines:
-		b.WriteString(m.renderPipelinesTab())
+	case TabWorkflows:
+		b.WriteString(m.renderWorkflowsTab())
 	case TabDocs:
 		b.WriteString(m.renderDocsTab())
 	case TabConventions:
@@ -289,21 +289,21 @@ func (m Model) renderStatusTab() string {
 			fmt.Sprintf("Total:  %d", len(m.sessions)),
 	)
 
-	// Pipelines summary
-	activePipelines := 0
+	// Workflows summary
+	activeWorkflows := 0
 	for _, p := range m.pipelines {
 		if p.Status == "running" {
-			activePipelines++
+			activeWorkflows++
 		}
 	}
 
-	pipelineBox := boxStyle.Width(35).Render(
-		titleStyle.Render("🔄 Pipelines") + "\n" +
-			fmt.Sprintf("Running: %s\n", statusActiveStyle.Render(fmt.Sprintf("%d", activePipelines))) +
+	workflowBox := boxStyle.Width(35).Render(
+		titleStyle.Render("🔄 Workflows") + "\n" +
+			fmt.Sprintf("Running: %s\n", statusActiveStyle.Render(fmt.Sprintf("%d", activeWorkflows))) +
 			fmt.Sprintf("Total:   %d", len(m.pipelines)),
 	)
 
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, sessionBox, "  ", pipelineBox))
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, sessionBox, "  ", workflowBox))
 	b.WriteString("\n\n")
 
 	// Documents summary
@@ -374,14 +374,14 @@ func (m Model) renderSessionsTab() string {
 	return b.String()
 }
 
-func (m Model) renderPipelinesTab() string {
+func (m Model) renderWorkflowsTab() string {
 	var b strings.Builder
 
-	b.WriteString(titleStyle.Render("🔄 Pipelines"))
+	b.WriteString(titleStyle.Render("🔄 Workflows"))
 	b.WriteString("\n\n")
 
 	if len(m.pipelines) == 0 {
-		b.WriteString(statusMutedStyle.Render("  No pipelines"))
+		b.WriteString(statusMutedStyle.Render("  No workflows"))
 		return b.String()
 	}
 

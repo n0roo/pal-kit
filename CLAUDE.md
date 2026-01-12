@@ -1,40 +1,46 @@
 # pal-kit
 
-> PAL Kit 관리 프로젝트 | 생성일: 2026-01-12
+> PAL Kit CLI 도구 프로젝트 | Go 기반
 
 ---
 
-## 🚀 PAL Kit 초기 설정 필요
+## 프로젝트 개요
 
-이 프로젝트는 **PAL Kit 환경이 구성되지 않았습니다.**
-
-### Claude에게 요청하세요:
-
-```
-이 프로젝트의 PAL Kit 환경을 설정해줘
-```
-
-### 설정 과정:
-
-1. **프로젝트 분석** - 기술 스택, 구조 파악
-2. **워크플로우 선택** - simple / single / integrate / multi
-3. **에이전트 구성** - 워크플로우에 맞는 에이전트 설정
-4. **컨벤션 정의** - 프로젝트 규칙 설정
+PAL Kit은 Claude Code와 함께 사용하는 프로젝트 관리 CLI 도구입니다.
+포트 기반 작업 관리, 에이전트 시스템, 파이프라인 워크플로우를 제공합니다.
 
 ---
 
-## 워크플로우 타입 안내
+## 기술 스택
 
-| 타입 | 설명 | 적합한 경우 |
-|------|------|------------|
-| **simple** | 대화형 협업, 종합 에이전트 | 간단한 작업, 학습 |
-| **single** | 단일 세션, 역할 전환 | 중간 규모 기능 |
-| **integrate** | 빌더 관리, 서브세션 | 복잡한 기능, 여러 기술 |
-| **multi** | 복수 integrate | 대규모 프로젝트 |
+- **언어**: Go
+- **구조**: cmd/, internal/ 기반 표준 Go 레이아웃
 
 ---
 
-## PAL Kit 기본 명령어
+## 워크플로우
+
+**integrate** - 빌더 관리, 서브세션 방식
+
+복잡한 기능 개발과 여러 기술 스택을 다루는 작업에 적합합니다.
+
+---
+
+## 에이전트
+
+| 에이전트 | 타입 | 역할 |
+|---------|------|------|
+| builder | core | 빌드 관리 |
+| planner | core | 작업 계획 |
+| architect | core | 설계 |
+| manager | core | 세션 관리 |
+| tester | core | 테스트 |
+| logger | core | 로깅 |
+| worker-go | worker | Go 코드 작성 |
+
+---
+
+## PAL Kit 명령어
 
 ```bash
 # 상태 확인
@@ -62,7 +68,10 @@ pal serve
 
 ```
 .
-├── CLAUDE.md           # 이 파일 (프로젝트 컨텍스트)
+├── CLAUDE.md           # 프로젝트 컨텍스트
+├── cmd/                # CLI 진입점
+├── internal/           # 내부 패키지
+├── docs/               # 문서
 ├── agents/             # 에이전트 정의
 ├── ports/              # 포트 명세
 ├── conventions/        # 컨벤션 문서
@@ -70,32 +79,39 @@ pal serve
 │   ├── settings.json   # Claude Code Hook 설정
 │   └── rules/          # 조건부 규칙
 └── .pal/
-    └── config.yaml     # PAL Kit 설정 (설정 후 생성)
+    └── config.yaml     # PAL Kit 설정
 ```
 
 ---
 
-<!-- pal:config:status=pending -->
-<!-- 
-  PAL Kit 설정 상태: 미완료
-  설정 완료 후 이 섹션이 업데이트됩니다.
-  
-  설정 완료 시 포함될 내용:
-  - 선택된 워크플로우 타입
-  - 구성된 에이전트 목록
-  - 적용된 컨벤션
-  - 작업 시작 가이드
+<!-- pal:config:status=configured -->
+<!--
+  PAL Kit 설정 상태: 완료
+  워크플로우: integrate
+  설정일: 2026-01-12
 -->
 
 
+<!-- pal:active-worker:start -->
+<!-- pal:active-worker:end -->
+
 <!-- pal:context:start -->
-> 마지막 업데이트: 2026-01-12 01:10:52
+> 마지막 업데이트: 2026-01-12 11:39:57
 
 ### 활성 세션
-- **57bfac04**: -
+- **c2033d59**: -
+- **293d3037**: -
+- **311a55dc**: -
+- **d9590be4**: -
+- **4bd7da58**: -
 
 ### 포트 현황
-- 없음
+- ✅ complete: 2
+- ⏳ pending: 8
+- 🔄 running: 1
+
+### 진행 중인 작업
+- **agent-convention-split**: 코어/워커 에이전트 컨벤션 분리 및 고도화
 
 ### 에스컬레이션
 - 없음

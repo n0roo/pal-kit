@@ -21,7 +21,7 @@
             <button class="nav-btn" data-tab="sessions">Sessions</button>
             <button class="nav-btn" data-tab="history">History</button>
             <button class="nav-btn" data-tab="ports">Ports</button>
-            <button class="nav-btn" data-tab="pipelines">Pipelines</button>
+            <button class="nav-btn" data-tab="workflows">Workflows</button>
             <button class="nav-btn" data-tab="docs">Documents</button>
             <button class="nav-btn" data-tab="conventions">Conventions</button>
             <button class="nav-btn" data-tab="agents">Agents</button>
@@ -31,61 +31,73 @@
             <!-- Status Tab -->
             <section id="tab-status" class="tab-content active">
                 <h2>Overview</h2>
-                <div class="stats-grid">
-                    <div class="stat-card">
+
+                <!-- Main Cards Row -->
+                <div class="overview-grid">
+                    <div class="stat-card clickable" onclick="showOverviewModal('active-sessions')">
                         <div class="stat-icon">📍</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-sessions-active">-</div>
                             <div class="stat-label">Active Sessions</div>
                         </div>
+                        <div class="stat-action">▶</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card clickable" onclick="showOverviewModal('completed-sessions')">
                         <div class="stat-icon">✅</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-sessions-completed">-</div>
                             <div class="stat-label">Completed Sessions</div>
                         </div>
+                        <div class="stat-action">▶</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card clickable" onclick="showOverviewModal('ports')">
                         <div class="stat-icon">📦</div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-ports-total">-</div>
                             <div class="stat-label">Ports</div>
+                            <div class="stat-sub" id="stat-ports-breakdown">-</div>
                         </div>
+                        <div class="stat-action">▶</div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card clickable" onclick="showOverviewModal('workflows')">
                         <div class="stat-icon">🔄</div>
                         <div class="stat-info">
-                            <div class="stat-value" id="stat-pipelines-running">-</div>
-                            <div class="stat-label">Running Pipelines</div>
+                            <div class="stat-value" id="stat-workflows-running">-</div>
+                            <div class="stat-label">Workflows</div>
+                        </div>
+                        <div class="stat-action">▶</div>
+                    </div>
+                </div>
+
+                <!-- Metrics Row -->
+                <h3 class="section-title">Metrics</h3>
+                <div class="metrics-grid">
+                    <div class="metric-card clickable" onclick="showOverviewModal('tokens')">
+                        <div class="metric-icon">🔢</div>
+                        <div class="metric-info">
+                            <div class="metric-value" id="stat-total-tokens">-</div>
+                            <div class="metric-label">Total Tokens</div>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">🔢</div>
-                        <div class="stat-info">
-                            <div class="stat-value" id="stat-total-tokens">-</div>
-                            <div class="stat-label">Total Tokens</div>
+                    <div class="metric-card highlight clickable" onclick="showOverviewModal('cost')">
+                        <div class="metric-icon">💰</div>
+                        <div class="metric-info">
+                            <div class="metric-value" id="stat-total-cost">-</div>
+                            <div class="metric-label">Total Cost</div>
                         </div>
                     </div>
-                    <div class="stat-card highlight">
-                        <div class="stat-icon">💰</div>
-                        <div class="stat-info">
-                            <div class="stat-value" id="stat-total-cost">-</div>
-                            <div class="stat-label">Total Cost (USD)</div>
+                    <div class="metric-card clickable" onclick="showOverviewModal('time')">
+                        <div class="metric-icon">⏱️</div>
+                        <div class="metric-info">
+                            <div class="metric-value" id="stat-total-duration">-</div>
+                            <div class="metric-label">Total Time</div>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">⏱️</div>
-                        <div class="stat-info">
-                            <div class="stat-value" id="stat-total-duration">-</div>
-                            <div class="stat-label">Total Time</div>
-                        </div>
-                    </div>
-                    <div class="stat-card warning">
-                        <div class="stat-icon">🚨</div>
-                        <div class="stat-info">
-                            <div class="stat-value" id="stat-escalations-open">-</div>
-                            <div class="stat-label">Open Escalations</div>
+                    <div class="metric-card warning clickable" onclick="showOverviewModal('escalations')">
+                        <div class="metric-icon">🚨</div>
+                        <div class="metric-info">
+                            <div class="metric-value" id="stat-escalations-open">-</div>
+                            <div class="metric-label">Escalations</div>
                         </div>
                     </div>
                 </div>
@@ -153,9 +165,9 @@
                 </div>
             </section>
 
-            <!-- Pipelines Tab -->
-            <section id="tab-pipelines" class="tab-content">
-                <h2>Pipelines</h2>
+            <!-- Workflows Tab -->
+            <section id="tab-workflows" class="tab-content">
+                <h2>Workflows</h2>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
@@ -166,7 +178,7 @@
                                 <th>Created</th>
                             </tr>
                         </thead>
-                        <tbody id="pipelines-table"></tbody>
+                        <tbody id="workflows-table"></tbody>
                     </table>
                 </div>
             </section>

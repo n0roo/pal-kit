@@ -530,21 +530,44 @@ func runHookPortStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 컨텍스트 주입
-	ctxSvc := context.NewService(database)
-	claudeMD := context.FindClaudeMD(cwd)
-	if claudeMD != "" {
-		ctxSvc.InjectToFile(claudeMD)
+	// Claude 통합 서비스로 컨텍스트 처리
+	claudeSvc := context.NewClaudeService(database, projectRoot)
+	result, err := claudeSvc.ProcessPortStart(portID)
+	if err != nil {
+		// 실패해도 기본 동작은 수행
+		if verbose {
+			fmt.Fprintf(os.Stderr, "⚠️  워커 매핑 실패: %v\n", err)
+		}
+		// 기본 컨텍스트 주입
+		ctxSvc := context.NewService(database)
+		claudeMD := context.FindClaudeMD(cwd)
+		if claudeMD != "" {
+			ctxSvc.InjectToFile(claudeMD)
+		}
 	}
 
 	if jsonOut {
-		json.NewEncoder(os.Stdout).Encode(map[string]string{
+		output := map[string]interface{}{
 			"status": "started",
 			"port":   portID,
-		})
+		}
+		if result != nil {
+			output["worker_id"] = result.WorkerID
+			output["worker_name"] = result.WorkerName
+			output["token_count"] = result.TokenCount
+			output["checklist"] = result.Checklist
+		}
+		json.NewEncoder(os.Stdout).Encode(output)
 	} else {
 		fmt.Printf("▶️  포트 시작: %s\n", portID)
 		fmt.Printf("   Rules: %s\n", rulesSvc.GetRulePath(portID))
+		if result != nil {
+			fmt.Printf("   워커: %s (%s)\n", result.WorkerName, result.WorkerID)
+			fmt.Printf("   토큰: ~%d\n", result.TokenCount)
+			if len(result.Checklist) > 0 {
+				fmt.Printf("   체크리스트: %d 항목\n", len(result.Checklist))
+			}
+		}
 	}
 
 	return nil
@@ -589,7 +612,14 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 컨텍스트 업데이트
+	// Claude 통합 서비스로 컨텍스트 정리
+	var result *context.PortEndResult
+	if projectRoot != "" {
+		claudeSvc := context.NewClaudeService(database, projectRoot)
+		result, _ = claudeSvc.ProcessPortEnd(portID, "")
+	}
+
+	// 기본 컨텍스트 업데이트
 	ctxSvc := context.NewService(database)
 	claudeMD := context.FindClaudeMD(cwd)
 	if claudeMD != "" {
@@ -597,10 +627,14 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 	}
 
 	if jsonOut {
-		json.NewEncoder(os.Stdout).Encode(map[string]string{
+		output := map[string]interface{}{
 			"status": "completed",
 			"port":   portID,
-		})
+		}
+		if result != nil {
+			output["message"] = result.Message
+		}
+		json.NewEncoder(os.Stdout).Encode(output)
 	} else {
 		fmt.Printf("✅ 포트 완료: %s\n", portID)
 	}

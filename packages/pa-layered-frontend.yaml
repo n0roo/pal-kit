@@ -1,0 +1,64 @@
+package:
+  id: pa-layered-frontend
+  name: PA-Layered Frontend
+  version: "1.0.0"
+  description: |
+    PA-Layered 아키텍처 기반 프론트엔드 패키지.
+    Orchestration/Logic/View 레이어 분리.
+
+  tech:
+    language: typescript
+    frameworks:
+      - react
+      - next.js
+      - tanstack-query
+      - zustand
+      - tailwindcss
+    build_tool: npm
+    runtime: node
+
+  architecture:
+    name: PA-Layered-Frontend
+    layers:
+      - Orchestration  # Pages, Routes, API Integration
+      - Logic          # State, Hooks, Business Logic
+      - View           # UI Components, Design System
+      - Test           # E2E, Unit Tests
+    conventions_ref: conventions/agents/workers/frontend/
+    dependency_rule: |
+      Orchestration → Logic (OK)
+      Orchestration → View (OK)
+      Logic → View (NO)
+      View → Logic (NO)
+      View → View (OK - Composition)
+
+  methodology:
+    port_driven: true
+    cqs: false
+    event_driven: false
+
+  workers:
+    - frontend-engineer-worker   # Orchestration Layer
+    - component-model-worker     # Logic Layer
+    - component-ui-worker        # View Layer
+    - e2e-worker                 # E2E Testing
+    - unit-tc-worker             # Unit Testing
+
+  core_overrides:
+    architect:
+      conventions_ref: conventions/agents/core/architect.md
+      validation_rules:
+        - layer-dependency
+        - component-naming
+
+    builder:
+      port_templates:
+        - templates/pa-layered/tpl-client-api-port.md
+        - templates/pa-layered/tpl-client-query-adapter.md
+        - templates/pa-layered/tpl-client-feature-composition.md
+        - templates/pa-layered/tpl-client-component-port.md
+
+    tester:
+      conventions_ref: conventions/agents/core/tester.md
+      validation_rules:
+        - coverage-frontend
