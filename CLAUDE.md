@@ -92,8 +92,11 @@ pal serve
 -->
 
 
+<!-- pal:active-worker:start -->
+<!-- pal:active-worker:end -->
+
 <!-- pal:context:start -->
-> 마지막 업데이트: 2026-01-12 09:58:18
+> 마지막 업데이트: 2026-01-12 10:36:18
 
 ### 활성 세션
 - **293d3037**: -
@@ -102,8 +105,8 @@ pal serve
 - **4bd7da58**: -
 
 ### 포트 현황
-- ✅ complete: 1
-- ⏳ pending: 9
+- ✅ complete: 2
+- ⏳ pending: 8
 - 🔄 running: 1
 
 ### 진행 중인 작업
