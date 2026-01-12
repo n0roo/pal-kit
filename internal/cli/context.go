@@ -46,13 +46,38 @@ var ctxForPortCmd = &cobra.Command{
 	RunE:  runCtxForPort,
 }
 
+var ctxReloadCmd = &cobra.Command{
+	Use:   "reload",
+	Short: "컨텍스트 새로고침",
+	Long:  `현재 활성 워커의 컨텍스트를 새로고침합니다.`,
+	RunE:  runCtxReload,
+}
+
+var ctxClaudeCmd = &cobra.Command{
+	Use:   "claude",
+	Short: "Claude 통합 컨텍스트",
+	Long: `Claude Code와 연동되는 컨텍스트를 표시합니다.
+
+컨텍스트 로딩 순서:
+1. CLAUDE.md (프로젝트 기본 정보)
+2. 패키지 컨벤션 (architecture.md)
+3. 워커 공통 컨벤션 (_common.md)
+4. 워커 개별 컨벤션 ({worker}.md)
+5. 포트 명세 (ports/{port-id}.md)
+6. 워커 프롬프트 (agents/{worker}.yaml → prompt)`,
+	RunE: runCtxClaude,
+}
+
 func init() {
 	rootCmd.AddCommand(contextCmd)
 	contextCmd.AddCommand(ctxShowCmd)
 	contextCmd.AddCommand(ctxInjectCmd)
 	contextCmd.AddCommand(ctxForPortCmd)
+	contextCmd.AddCommand(ctxReloadCmd)
+	contextCmd.AddCommand(ctxClaudeCmd)
 
 	ctxInjectCmd.Flags().StringVar(&ctxFile, "file", "", "CLAUDE.md 파일 경로 (자동 탐색)")
+	ctxClaudeCmd.Flags().StringVar(&ctxPortID, "port", "", "포트 ID")
 }
 
 func getContextService() (*context.Service, func(), error) {
@@ -147,5 +172,71 @@ func runCtxForPort(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(ctx)
 
+	return nil
+}
+
+func runCtxReload(cmd *cobra.Command, args []string) error {
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	claudeSvc := context.NewClaudeService(database, projectRoot)
+
+	result, err := claudeSvc.ReloadContext()
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
+
+	fmt.Printf("🔄 컨텍스트 새로고침 완료\n")
+	fmt.Printf("   워커: %s\n", result.WorkerID)
+	fmt.Printf("   토큰: ~%d\n", result.TokenCount)
+	if len(result.Checklist) > 0 {
+		fmt.Printf("   체크리스트: %d 항목\n", len(result.Checklist))
+	}
+
+	return nil
+}
+
+func runCtxClaude(cmd *cobra.Command, args []string) error {
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	claudeSvc := context.NewClaudeService(database, projectRoot)
+
+	ctx, err := claudeSvc.GetCurrentContext(ctxPortID, "")
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		output := map[string]interface{}{
+			"context": ctx,
+			"port_id": ctxPortID,
+		}
+		return json.NewEncoder(os.Stdout).Encode(output)
+	}
+
+	fmt.Println(ctx)
 	return nil
 }

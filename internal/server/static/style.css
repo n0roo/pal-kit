@@ -114,6 +114,30 @@ body {
     gap: 1rem;
 }
 
+/* Overview Grid - 2x2 main cards */
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+/* Metrics Grid - 4 columns */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+/* Section Title */
+.section-title {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1rem;
+}
+
 .stat-card {
     background: var(--bg-card);
     border-radius: var(--radius);
@@ -151,6 +175,79 @@ body {
 .stat-label {
     color: var(--text-muted);
     font-size: 0.85rem;
+}
+
+.stat-sub {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.stat-action {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+/* Clickable Cards */
+.stat-card.clickable,
+.metric-card.clickable {
+    cursor: pointer;
+}
+
+.stat-card.clickable:hover .stat-action,
+.metric-card.clickable:hover .stat-action {
+    opacity: 1;
+}
+
+/* Metric Card */
+.metric-card {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid var(--border);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.metric-card.highlight {
+    border-color: var(--secondary);
+}
+
+.metric-card.highlight .metric-value {
+    color: var(--secondary);
+}
+
+.metric-card.warning {
+    border-color: var(--warning);
+}
+
+.metric-card.warning .metric-value {
+    color: var(--warning);
+}
+
+.metric-icon {
+    font-size: 1.5rem;
+}
+
+.metric-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--primary-light);
+}
+
+.metric-label {
+    color: var(--text-muted);
+    font-size: 0.8rem;
 }
 
 /* Tables */
@@ -318,16 +415,34 @@ body {
 }
 
 /* Responsive */
+@media (max-width: 1024px) {
+    .overview-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 @media (max-width: 768px) {
     .header {
         flex-direction: column;
         gap: 1rem;
     }
-    
+
     .stats-grid {
         grid-template-columns: repeat(2, 1fr);
     }
-    
+
+    .overview-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
     .main {
         padding: 1rem;
     }

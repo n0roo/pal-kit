@@ -1,0 +1,41 @@
+package:
+  id: pa-layered-base
+  name: PA-Layered Base
+  version: "1.0.0"
+  description: |
+    PA-Layered 아키텍처 기본 패키지.
+    다른 PA-Layered 패키지의 기반이 되는 공통 설정.
+
+  tech:
+    language: ""  # 상속받는 패키지에서 정의
+
+  architecture:
+    name: PA-Layered
+    layers: []  # 상속받는 패키지에서 정의
+    conventions_ref: conventions/agents/
+
+  methodology:
+    port_driven: true
+    cqs: true
+    event_driven: true
+
+  workers: []  # 상속받는 패키지에서 정의
+
+  core_overrides:
+    builder:
+      conventions_ref: conventions/agents/core/builder.md
+
+    planner:
+      conventions_ref: conventions/agents/core/planner.md
+
+    architect:
+      conventions_ref: conventions/agents/core/architect.md
+
+    manager:
+      conventions_ref: conventions/agents/core/manager.md
+
+    tester:
+      conventions_ref: conventions/agents/core/tester.md
+
+    logger:
+      conventions_ref: conventions/agents/core/logger.md

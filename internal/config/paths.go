@@ -41,6 +41,16 @@ func GlobalTemplatesDir() string {
 	return filepath.Join(GlobalDir(), "templates")
 }
 
+// GlobalPackagesDir returns the global packages directory (~/.pal/packages)
+func GlobalPackagesDir() string {
+	return filepath.Join(GlobalDir(), "packages")
+}
+
+// GlobalPalDir is an alias for GlobalDir for package compatibility
+func GlobalPalDir() string {
+	return GlobalDir()
+}
+
 // GlobalConfigPath returns the global config file path (~/.pal/config.yaml)
 func GlobalConfigPath() string {
 	return filepath.Join(GlobalDir(), "config.yaml")
@@ -112,6 +122,7 @@ func EnsureGlobalDirs() error {
 		GlobalAgentsDir(),
 		GlobalConventionsDir(),
 		GlobalTemplatesDir(),
+		GlobalPackagesDir(),
 	}
 
 	for _, dir := range dirs {
