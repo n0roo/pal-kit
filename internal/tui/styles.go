@@ -62,6 +62,79 @@ var (
 
 	progressEmptyStyle = lipgloss.NewStyle().
 				Foreground(mutedColor)
+
+	// List item styles
+	selectedItemStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#374151")).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Bold(true).
+				PaddingLeft(1).
+				PaddingRight(1)
+
+	normalItemStyle = lipgloss.NewStyle().
+			PaddingLeft(2)
+
+	// Cursor indicator
+	cursorStyle = lipgloss.NewStyle().
+			Foreground(primaryColor).
+			Bold(true)
+
+	// Help overlay styles
+	overlayStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primaryColor).
+			Background(lipgloss.Color("#1F2937")).
+			Padding(1, 2)
+
+	helpTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(primaryColor).
+			MarginBottom(1)
+
+	helpSectionStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(secondaryColor).
+				MarginTop(1)
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FBBF24")).
+			Bold(true)
+
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#D1D5DB"))
+
+	// Detail panel styles
+	detailPanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(primaryColor).
+				Padding(1, 2)
+
+	detailPanelInactiveStyle = lipgloss.NewStyle().
+					Border(lipgloss.RoundedBorder()).
+					BorderForeground(mutedColor).
+					Padding(1, 2)
+
+	listPanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primaryColor).
+			Padding(0, 1)
+
+	listPanelInactiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(mutedColor).
+				Padding(0, 1)
+
+	detailLabelStyle = lipgloss.NewStyle().
+				Foreground(mutedColor).
+				Width(12)
+
+	detailValueStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFFFFF"))
+
+	detailTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(primaryColor).
+				MarginBottom(1)
 )
 
 // RenderProgressBar renders a progress bar

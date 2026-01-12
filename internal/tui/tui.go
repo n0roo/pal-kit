@@ -30,6 +30,14 @@ func (t Tab) String() string {
 	return []string{"Status", "Sessions", "Workflows", "Docs", "Conventions"}[t]
 }
 
+// Panel represents which panel is focused
+type Panel int
+
+const (
+	PanelList Panel = iota
+	PanelDetail
+)
+
 // Model is the main TUI model
 type Model struct {
 	// Config
@@ -37,12 +45,18 @@ type Model struct {
 	dbPath      string
 
 	// State
-	currentTab  Tab
-	width       int
-	height      int
-	ready       bool
-	lastRefresh time.Time
-	err         error
+	currentTab   Tab
+	focusedPanel Panel
+	showDetail   bool
+	width        int
+	height       int
+	ready        bool
+	lastRefresh  time.Time
+	err          error
+	showHelp     bool
+
+	// Cursor state per tab
+	cursors map[Tab]int
 
 	// Data
 	sessions    []session.Session
@@ -78,6 +92,7 @@ func NewModel(projectRoot, dbPath string) Model {
 		projectRoot: projectRoot,
 		dbPath:      dbPath,
 		currentTab:  TabStatus,
+		cursors:     make(map[Tab]int),
 		spinner:     s,
 	}
 }
@@ -138,13 +153,61 @@ func (m Model) refreshData() tea.Msg {
 	return data
 }
 
+// getListSize returns the list size for the current tab
+func (m Model) getListSize() int {
+	switch m.currentTab {
+	case TabSessions:
+		return len(m.sessions)
+	case TabWorkflows:
+		return len(m.pipelines)
+	case TabDocs:
+		return len(m.documents)
+	case TabConventions:
+		return len(m.conventions)
+	default:
+		return 0
+	}
+}
+
+// moveCursor moves the cursor up or down
+func (m *Model) moveCursor(delta int) {
+	size := m.getListSize()
+	if size == 0 {
+		return
+	}
+
+	cursor := m.cursors[m.currentTab]
+	cursor += delta
+
+	// Clamp cursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= size {
+		cursor = size - 1
+	}
+
+	m.cursors[m.currentTab] = cursor
+}
+
 // Update handles messages
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle help overlay first
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.showHelp = false
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "?":
+			m.showHelp = true
 		case "1":
 			m.currentTab = TabStatus
 		case "2":
@@ -161,6 +224,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentTab = Tab((int(m.currentTab) + 1) % 5)
 		case "shift+tab":
 			m.currentTab = Tab((int(m.currentTab) + 4) % 5)
+
+		// List navigation
+		case "j", "down":
+			m.moveCursor(1)
+		case "k", "up":
+			m.moveCursor(-1)
+		case "g", "home":
+			m.cursors[m.currentTab] = 0
+		case "G", "end":
+			size := m.getListSize()
+			if size > 0 {
+				m.cursors[m.currentTab] = size - 1
+			}
+
+		// Panel navigation (only for tabs with lists)
+		case "enter", "l":
+			if m.currentTab != TabStatus && m.getListSize() > 0 {
+				m.showDetail = true
+				m.focusedPanel = PanelDetail
+			}
+		case "h", "esc":
+			if m.showDetail {
+				m.showDetail = false
+				m.focusedPanel = PanelList
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -183,6 +271,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.lastRefresh = time.Now()
 
+		// Clamp cursors after data refresh
+		for tab := TabSessions; tab <= TabConventions; tab++ {
+			var size int
+			switch tab {
+			case TabSessions:
+				size = len(m.sessions)
+			case TabWorkflows:
+				size = len(m.pipelines)
+			case TabDocs:
+				size = len(m.documents)
+			case TabConventions:
+				size = len(m.conventions)
+			}
+			if m.cursors[tab] >= size && size > 0 {
+				m.cursors[tab] = size - 1
+			}
+		}
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -198,6 +304,11 @@ func (m Model) View() string {
 		return "\n  Loading..."
 	}
 
+	// Show help overlay if active
+	if m.showHelp {
+		return m.renderHelpOverlay()
+	}
+
 	var b strings.Builder
 
 	// Header
@@ -208,18 +319,22 @@ func (m Model) View() string {
 	b.WriteString(m.renderTabs())
 	b.WriteString("\n\n")
 
-	// Content
-	switch m.currentTab {
-	case TabStatus:
-		b.WriteString(m.renderStatusTab())
-	case TabSessions:
-		b.WriteString(m.renderSessionsTab())
-	case TabWorkflows:
-		b.WriteString(m.renderWorkflowsTab())
-	case TabDocs:
-		b.WriteString(m.renderDocsTab())
-	case TabConventions:
-		b.WriteString(m.renderConventionsTab())
+	// Content - split view for list tabs when detail is shown
+	if m.showDetail && m.currentTab != TabStatus {
+		b.WriteString(m.renderSplitView())
+	} else {
+		switch m.currentTab {
+		case TabStatus:
+			b.WriteString(m.renderStatusTab())
+		case TabSessions:
+			b.WriteString(m.renderSessionsTab())
+		case TabWorkflows:
+			b.WriteString(m.renderWorkflowsTab())
+		case TabDocs:
+			b.WriteString(m.renderDocsTab())
+		case TabConventions:
+			b.WriteString(m.renderConventionsTab())
+		}
 	}
 
 	// Footer
@@ -268,8 +383,145 @@ func (m Model) renderTabs() string {
 }
 
 func (m Model) renderFooter() string {
-	help := "  [1-5] Switch tabs  [Tab] Next  [r] Refresh  [q] Quit"
+	var help string
+	if m.showDetail {
+		help = "  [j/k] Navigate  [h/Esc] Close detail  [l/Enter] Open detail  [?] Help  [q] Quit"
+	} else {
+		help = "  [j/k] Navigate  [l/Enter] Detail  [1-5] Tabs  [?] Help  [q] Quit"
+	}
 	return helpStyle.Render(help)
+}
+
+func (m Model) renderHelpOverlay() string {
+	var b strings.Builder
+
+	// Title
+	b.WriteString(helpTitleStyle.Render("📖 PAL Kit TUI Help"))
+	b.WriteString("\n\n")
+
+	// Navigation section
+	b.WriteString(helpSectionStyle.Render("Navigation"))
+	b.WriteString("\n")
+	helpItems := []struct{ key, desc string }{
+		{"j / ↓", "Move down"},
+		{"k / ↑", "Move up"},
+		{"g / Home", "Go to first item"},
+		{"G / End", "Go to last item"},
+		{"l / Enter", "Open detail view"},
+		{"h / Esc", "Close detail view"},
+	}
+	for _, item := range helpItems {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			helpKeyStyle.Render(fmt.Sprintf("%-10s", item.key)),
+			helpDescStyle.Render(item.desc)))
+	}
+
+	// Tabs section
+	b.WriteString("\n")
+	b.WriteString(helpSectionStyle.Render("Tabs"))
+	b.WriteString("\n")
+	tabItems := []struct{ key, desc string }{
+		{"1", "Status overview"},
+		{"2", "Sessions list"},
+		{"3", "Workflows list"},
+		{"4", "Documents list"},
+		{"5", "Conventions list"},
+		{"Tab", "Next tab"},
+		{"Shift+Tab", "Previous tab"},
+	}
+	for _, item := range tabItems {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			helpKeyStyle.Render(fmt.Sprintf("%-10s", item.key)),
+			helpDescStyle.Render(item.desc)))
+	}
+
+	// General section
+	b.WriteString("\n")
+	b.WriteString(helpSectionStyle.Render("General"))
+	b.WriteString("\n")
+	generalItems := []struct{ key, desc string }{
+		{"r", "Refresh data"},
+		{"?", "Toggle help"},
+		{"q / Ctrl+C", "Quit"},
+	}
+	for _, item := range generalItems {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			helpKeyStyle.Render(fmt.Sprintf("%-10s", item.key)),
+			helpDescStyle.Render(item.desc)))
+	}
+
+	// Close hint
+	b.WriteString("\n")
+	b.WriteString(statusMutedStyle.Render("Press ? or Esc to close"))
+
+	// Center the overlay
+	content := overlayStyle.Render(b.String())
+
+	// Calculate position for centering
+	contentWidth := lipgloss.Width(content)
+	contentHeight := lipgloss.Height(content)
+
+	padLeft := (m.width - contentWidth) / 2
+	padTop := (m.height - contentHeight) / 2
+
+	if padLeft < 0 {
+		padLeft = 0
+	}
+	if padTop < 0 {
+		padTop = 0
+	}
+
+	return lipgloss.NewStyle().
+		PaddingLeft(padLeft).
+		PaddingTop(padTop).
+		Render(content)
+}
+
+func (m Model) renderSplitView() string {
+	// Calculate panel widths (40% list, 60% detail)
+	availableWidth := m.width
+	if availableWidth < 80 {
+		availableWidth = 80
+	}
+
+	listWidth := availableWidth * 35 / 100
+	detailWidth := availableWidth * 55 / 100
+
+	// Ensure minimum widths
+	if listWidth < 25 {
+		listWidth = 25
+	}
+	if detailWidth < 30 {
+		detailWidth = 30
+	}
+
+	// Get list content
+	var listContent string
+	switch m.currentTab {
+	case TabSessions:
+		listContent = m.renderSessionsTab()
+	case TabWorkflows:
+		listContent = m.renderWorkflowsTab()
+	case TabDocs:
+		listContent = m.renderDocsTab()
+	case TabConventions:
+		listContent = m.renderConventionsTab()
+	}
+
+	// Get detail content
+	detailContent := m.renderDetailPanel()
+
+	// Apply panel styles based on focus
+	var listPanel, detailPanel string
+	if m.focusedPanel == PanelList {
+		listPanel = listPanelStyle.Width(listWidth).Render(listContent)
+		detailPanel = detailPanelInactiveStyle.Width(detailWidth).Render(detailContent)
+	} else {
+		listPanel = listPanelInactiveStyle.Width(listWidth).Render(listContent)
+		detailPanel = detailPanelStyle.Width(detailWidth).Render(detailContent)
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, listPanel, " ", detailPanel)
 }
 
 func (m Model) renderStatusTab() string {
@@ -347,7 +599,9 @@ func (m Model) renderStatusTab() string {
 func (m Model) renderSessionsTab() string {
 	var b strings.Builder
 
+	cursor := m.cursors[TabSessions]
 	b.WriteString(titleStyle.Render("📍 Sessions"))
+	b.WriteString(statusMutedStyle.Render(fmt.Sprintf(" (%d/%d)", cursor+1, len(m.sessions))))
 	b.WriteString("\n\n")
 
 	if len(m.sessions) == 0 {
@@ -355,7 +609,7 @@ func (m Model) renderSessionsTab() string {
 		return b.String()
 	}
 
-	for _, s := range m.sessions {
+	for i, s := range m.sessions {
 		icon := StatusIcon(s.Status)
 		title := s.ID
 		if s.Title.Valid {
@@ -368,7 +622,12 @@ func (m Model) renderSessionsTab() string {
 			duration = statusMutedStyle.Render(fmt.Sprintf(" (%s)", elapsed))
 		}
 
-		b.WriteString(fmt.Sprintf("  %s %s%s\n", icon, title, duration))
+		line := fmt.Sprintf("%s %s%s", icon, title, duration)
+		if i == cursor {
+			b.WriteString(cursorStyle.Render(">") + " " + selectedItemStyle.Render(line) + "\n")
+		} else {
+			b.WriteString(normalItemStyle.Render(line) + "\n")
+		}
 	}
 
 	return b.String()
@@ -377,7 +636,9 @@ func (m Model) renderSessionsTab() string {
 func (m Model) renderWorkflowsTab() string {
 	var b strings.Builder
 
+	cursor := m.cursors[TabWorkflows]
 	b.WriteString(titleStyle.Render("🔄 Workflows"))
+	b.WriteString(statusMutedStyle.Render(fmt.Sprintf(" (%d/%d)", cursor+1, len(m.pipelines))))
 	b.WriteString("\n\n")
 
 	if len(m.pipelines) == 0 {
@@ -385,9 +646,14 @@ func (m Model) renderWorkflowsTab() string {
 		return b.String()
 	}
 
-	for _, p := range m.pipelines {
+	for i, p := range m.pipelines {
 		icon := StatusIcon(p.Status)
-		b.WriteString(fmt.Sprintf("  %s %s (%s)\n", icon, p.Name, p.Status))
+		line := fmt.Sprintf("%s %s (%s)", icon, p.Name, p.Status)
+		if i == cursor {
+			b.WriteString(cursorStyle.Render(">") + " " + selectedItemStyle.Render(line) + "\n")
+		} else {
+			b.WriteString(normalItemStyle.Render(line) + "\n")
+		}
 	}
 
 	return b.String()
@@ -396,7 +662,9 @@ func (m Model) renderWorkflowsTab() string {
 func (m Model) renderDocsTab() string {
 	var b strings.Builder
 
+	cursor := m.cursors[TabDocs]
 	b.WriteString(titleStyle.Render("📚 Documents"))
+	b.WriteString(statusMutedStyle.Render(fmt.Sprintf(" (%d/%d)", cursor+1, len(m.documents))))
 	b.WriteString("\n\n")
 
 	if len(m.documents) == 0 {
@@ -417,6 +685,8 @@ func (m Model) renderDocsTab() string {
 		docs.DocTypeConvention,
 	}
 
+	// Flat index for cursor
+	idx := 0
 	for _, dt := range typeOrder {
 		docList := byType[dt]
 		if len(docList) == 0 {
@@ -428,7 +698,13 @@ func (m Model) renderDocsTab() string {
 
 		for _, d := range docList {
 			icon := StatusIcon(string(d.Status))
-			b.WriteString(fmt.Sprintf("    %s %s\n", icon, d.RelativePath))
+			line := fmt.Sprintf("%s %s", icon, d.RelativePath)
+			if idx == cursor {
+				b.WriteString("  " + cursorStyle.Render(">") + " " + selectedItemStyle.Render(line) + "\n")
+			} else {
+				b.WriteString("    " + line + "\n")
+			}
+			idx++
 		}
 		b.WriteString("\n")
 	}
@@ -439,7 +715,9 @@ func (m Model) renderDocsTab() string {
 func (m Model) renderConventionsTab() string {
 	var b strings.Builder
 
+	cursor := m.cursors[TabConventions]
 	b.WriteString(titleStyle.Render("📋 Conventions"))
+	b.WriteString(statusMutedStyle.Render(fmt.Sprintf(" (%d/%d)", cursor+1, len(m.conventions))))
 	b.WriteString("\n\n")
 
 	if len(m.conventions) == 0 {
@@ -449,7 +727,7 @@ func (m Model) renderConventionsTab() string {
 		return b.String()
 	}
 
-	for _, c := range m.conventions {
+	for i, c := range m.conventions {
 		status := "disabled"
 		if c.Enabled {
 			status = "enabled"
@@ -457,10 +735,227 @@ func (m Model) renderConventionsTab() string {
 		icon := StatusIcon(status)
 
 		rules := statusMutedStyle.Render(fmt.Sprintf("(%d rules)", len(c.Rules)))
-		b.WriteString(fmt.Sprintf("  %s %s %s\n", icon, c.Name, rules))
+		line := fmt.Sprintf("%s %s %s", icon, c.Name, rules)
+		if i == cursor {
+			b.WriteString(cursorStyle.Render(">") + " " + selectedItemStyle.Render(line) + "\n")
+		} else {
+			b.WriteString(normalItemStyle.Render(line) + "\n")
+		}
 	}
 
 	return b.String()
+}
+
+// Detail view renderers
+
+func (m Model) renderSessionDetail() string {
+	var b strings.Builder
+
+	cursor := m.cursors[TabSessions]
+	if cursor >= len(m.sessions) {
+		return statusMutedStyle.Render("No session selected")
+	}
+
+	s := m.sessions[cursor]
+
+	// Title
+	title := s.ID
+	if s.Title.Valid {
+		title = s.Title.String
+	}
+	b.WriteString(detailTitleStyle.Render("📍 " + title))
+	b.WriteString("\n\n")
+
+	// Details
+	details := []struct{ label, value string }{
+		{"ID", s.ID},
+		{"Status", s.Status},
+		{"Started", s.StartedAt.Format("2006-01-02 15:04:05")},
+	}
+
+	if s.EndedAt.Valid {
+		details = append(details, struct{ label, value string }{
+			"Ended", s.EndedAt.Time.Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	if s.Status == "active" {
+		elapsed := time.Since(s.StartedAt).Round(time.Second)
+		details = append(details, struct{ label, value string }{
+			"Duration", elapsed.String(),
+		})
+	}
+
+	for _, d := range details {
+		b.WriteString(detailLabelStyle.Render(d.label+":") + " ")
+		if d.label == "Status" {
+			b.WriteString(StatusIcon(d.value) + " " + d.value)
+		} else {
+			b.WriteString(detailValueStyle.Render(d.value))
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderWorkflowDetail() string {
+	var b strings.Builder
+
+	cursor := m.cursors[TabWorkflows]
+	if cursor >= len(m.pipelines) {
+		return statusMutedStyle.Render("No workflow selected")
+	}
+
+	p := m.pipelines[cursor]
+
+	// Title
+	b.WriteString(detailTitleStyle.Render("🔄 " + p.Name))
+	b.WriteString("\n\n")
+
+	// Details
+	details := []struct{ label, value string }{
+		{"ID", p.ID},
+		{"Status", p.Status},
+		{"Created", p.CreatedAt.Format("2006-01-02 15:04:05")},
+	}
+
+	if p.SessionID.Valid {
+		details = append(details, struct{ label, value string }{
+			"Session", p.SessionID.String,
+		})
+	}
+
+	if p.StartedAt.Valid {
+		details = append(details, struct{ label, value string }{
+			"Started", p.StartedAt.Time.Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	if p.CompletedAt.Valid {
+		details = append(details, struct{ label, value string }{
+			"Completed", p.CompletedAt.Time.Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	for _, d := range details {
+		b.WriteString(detailLabelStyle.Render(d.label+":") + " ")
+		if d.label == "Status" {
+			b.WriteString(StatusIcon(d.value) + " " + d.value)
+		} else {
+			b.WriteString(detailValueStyle.Render(d.value))
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderDocDetail() string {
+	var b strings.Builder
+
+	cursor := m.cursors[TabDocs]
+	if cursor >= len(m.documents) {
+		return statusMutedStyle.Render("No document selected")
+	}
+
+	d := m.documents[cursor]
+
+	// Title
+	b.WriteString(detailTitleStyle.Render("📄 " + d.RelativePath))
+	b.WriteString("\n\n")
+
+	// Details
+	details := []struct{ label, value string }{
+		{"Type", string(d.Type)},
+		{"Status", string(d.Status)},
+		{"Size", fmt.Sprintf("%d bytes", d.Size)},
+	}
+
+	for _, detail := range details {
+		b.WriteString(detailLabelStyle.Render(detail.label+":") + " ")
+		if detail.label == "Status" {
+			b.WriteString(StatusIcon(detail.value) + " " + detail.value)
+		} else {
+			b.WriteString(detailValueStyle.Render(detail.value))
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderConventionDetail() string {
+	var b strings.Builder
+
+	cursor := m.cursors[TabConventions]
+	if cursor >= len(m.conventions) {
+		return statusMutedStyle.Render("No convention selected")
+	}
+
+	c := m.conventions[cursor]
+
+	// Title
+	b.WriteString(detailTitleStyle.Render("📋 " + c.Name))
+	b.WriteString("\n\n")
+
+	// Details
+	status := "disabled"
+	if c.Enabled {
+		status = "enabled"
+	}
+
+	details := []struct{ label, value string }{
+		{"Status", status},
+		{"Rules", fmt.Sprintf("%d rules", len(c.Rules))},
+	}
+
+	if c.Description != "" {
+		details = append(details, struct{ label, value string }{
+			"Description", c.Description,
+		})
+	}
+
+	for _, d := range details {
+		b.WriteString(detailLabelStyle.Render(d.label+":") + " ")
+		if d.label == "Status" {
+			b.WriteString(StatusIcon(d.value) + " " + d.value)
+		} else {
+			b.WriteString(detailValueStyle.Render(d.value))
+		}
+		b.WriteString("\n")
+	}
+
+	// Rules list
+	if len(c.Rules) > 0 {
+		b.WriteString("\n")
+		b.WriteString(subtitleStyle.Render("Rules:"))
+		b.WriteString("\n")
+		for i, rule := range c.Rules {
+			if i >= 5 {
+				b.WriteString(statusMutedStyle.Render(fmt.Sprintf("  ... and %d more", len(c.Rules)-5)))
+				break
+			}
+			b.WriteString(fmt.Sprintf("  • %s\n", rule.ID))
+		}
+	}
+
+	return b.String()
+}
+
+func (m Model) renderDetailPanel() string {
+	switch m.currentTab {
+	case TabSessions:
+		return m.renderSessionDetail()
+	case TabWorkflows:
+		return m.renderWorkflowDetail()
+	case TabDocs:
+		return m.renderDocDetail()
+	case TabConventions:
+		return m.renderConventionDetail()
+	default:
+		return ""
+	}
 }
 
 // Run starts the TUI

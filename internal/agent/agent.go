@@ -45,7 +45,7 @@ func (s *Service) EnsureDir() error {
 	return os.MkdirAll(s.agentsDir, 0755)
 }
 
-// Load loads all agents from the agents directory
+// Load loads all agents from the agents directory (recursive)
 func (s *Service) Load() error {
 	s.agents = make(map[string]*Agent)
 
@@ -54,29 +54,32 @@ func (s *Service) Load() error {
 		return nil
 	}
 
-	entries, err := os.ReadDir(s.agentsDir)
-	if err != nil {
-		return fmt.Errorf("agents 디렉토리 읽기 실패: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	err := filepath.WalkDir(s.agentsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // 에러 발생한 경로는 스킵
 		}
 
-		name := entry.Name()
+		if d.IsDir() {
+			return nil // 디렉토리는 계속 탐색
+		}
+
+		name := d.Name()
 		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".md") {
-			continue
+			return nil
 		}
 
-		filePath := filepath.Join(s.agentsDir, name)
-		agent, err := s.loadAgentFile(filePath)
+		agent, err := s.loadAgentFile(path)
 		if err != nil {
 			// 로딩 실패한 파일은 스킵
-			continue
+			return nil
 		}
 
 		s.agents[agent.ID] = agent
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("agents 디렉토리 탐색 실패: %w", err)
 	}
 
 	return nil
