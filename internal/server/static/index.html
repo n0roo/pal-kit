@@ -139,22 +139,71 @@
 
             <!-- History Tab -->
             <section id="tab-history" class="tab-content">
-                <h2>Session History</h2>
+                <div class="tab-header">
+                    <h2>Event History</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="exportHistory('json')">Export JSON</button>
+                        <button class="btn btn-secondary" onclick="exportHistory('csv')">Export CSV</button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="filters-row">
+                    <div class="filter-group">
+                        <label>Event Type</label>
+                        <select id="history-event-type" onchange="loadEventHistory()">
+                            <option value="">All Types</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Project</label>
+                        <select id="history-project" onchange="loadEventHistory()">
+                            <option value="">All Projects</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Date Range</label>
+                        <select id="history-date-range" onchange="loadEventHistory()">
+                            <option value="today">Today</option>
+                            <option value="7d" selected>Last 7 days</option>
+                            <option value="30d">Last 30 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                    </div>
+                    <div class="filter-group search">
+                        <label>Search</label>
+                        <input type="text" id="history-search" placeholder="Search events..." onkeyup="debounceHistorySearch(this.value)">
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="history-stats">
+                    <span id="history-total">0 events</span>
+                    <span id="history-stats-detail"></span>
+                </div>
+
+                <!-- Events Table -->
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Date</th>
-                                <th>Sessions</th>
-                                <th>Completed</th>
-                                <th>Input Tokens</th>
-                                <th>Output Tokens</th>
-                                <th>Duration</th>
-                                <th>Cost (USD)</th>
+                                <th>Status</th>
+                                <th>Time</th>
+                                <th>Event Type</th>
+                                <th>Session</th>
+                                <th>Project</th>
+                                <th>Details</th>
                             </tr>
                         </thead>
                         <tbody id="history-table"></tbody>
                     </table>
+                </div>
+
+                <!-- Pagination -->
+                <div class="pagination" id="history-pagination">
+                    <button class="btn btn-secondary" id="history-prev" onclick="historyPrevPage()" disabled>Previous</button>
+                    <span id="history-page-info">Page 1</span>
+                    <button class="btn btn-secondary" id="history-next" onclick="historyNextPage()">Next</button>
                 </div>
             </section>
 

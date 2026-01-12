@@ -903,27 +903,214 @@ async function loadSessions() {
     `).join('');
 }
 
-// History
-async function loadHistory() {
-    const data = await fetchAPI('sessions/history?days=30');
+// History (Event Log)
+let historyPage = 0;
+let historyLimit = 50;
+let historyTotal = 0;
+let historySearchTimeout = null;
+
+async function initHistoryFilters() {
+    // Load event types
+    const types = await fetchAPI('history/types');
+    const typeSelect = document.getElementById('history-event-type');
+    if (types && types.length > 0) {
+        types.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            typeSelect.appendChild(opt);
+        });
+    }
+
+    // Load projects
+    const projects = await fetchAPI('history/projects');
+    const projectSelect = document.getElementById('history-project');
+    if (projects && projects.length > 0) {
+        projects.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            projectSelect.appendChild(opt);
+        });
+    }
+}
+
+async function loadEventHistory() {
+    const eventType = document.getElementById('history-event-type')?.value || '';
+    const project = document.getElementById('history-project')?.value || '';
+    const dateRange = document.getElementById('history-date-range')?.value || '7d';
+    const search = document.getElementById('history-search')?.value || '';
+
+    // Build query params
+    const params = new URLSearchParams();
+    if (eventType) params.set('event_type', eventType);
+    if (project) params.set('project', project);
+    if (search) params.set('search', search);
+    params.set('limit', historyLimit);
+    params.set('offset', historyPage * historyLimit);
+
+    // Date range
+    const now = new Date();
+    if (dateRange === 'today') {
+        const today = now.toISOString().split('T')[0];
+        params.set('start_date', today);
+    } else if (dateRange === '7d') {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 7);
+        params.set('start_date', d.toISOString().split('T')[0]);
+    } else if (dateRange === '30d') {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 30);
+        params.set('start_date', d.toISOString().split('T')[0]);
+    }
+
+    const data = await fetchAPI(`history/events?${params.toString()}`);
     const tbody = document.getElementById('history-table');
-    
-    if (!data || data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No history</td></tr>';
+
+    if (!data || !data.events || data.events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No events found</td></tr>';
+        document.getElementById('history-total').textContent = '0 events';
+        updateHistoryPagination(0);
         return;
     }
-    
-    tbody.innerHTML = data.map(h => `
+
+    historyTotal = data.total || 0;
+    document.getElementById('history-total').textContent = `${historyTotal} events`;
+    updateHistoryPagination(historyTotal);
+
+    tbody.innerHTML = data.events.map(e => `
         <tr>
-            <td>${escapeHtml(h.date)}</td>
-            <td>${h.count}</td>
-            <td>${h.completed}</td>
-            <td class="text-sm">${formatNumber(h.input_tokens)}</td>
-            <td class="text-sm">${formatNumber(h.output_tokens)}</td>
-            <td>${escapeHtml(h.duration_str || '-')}</td>
-            <td>$${(h.cost_usd || 0).toFixed(4)}</td>
+            <td>${eventStatusBadge(e.status)}</td>
+            <td class="text-sm">${formatTimeAgo(e.created_at)}</td>
+            <td>${eventTypeIcon(e.event_type)} ${escapeHtml(e.event_type)}</td>
+            <td class="text-sm">${e.session_id ? `<a href="#" onclick="showSessionDetail('${e.session_id}'); return false;">${escapeHtml(e.session_id.substring(0, 8))}...</a>` : '-'}</td>
+            <td class="text-sm">${escapeHtml(e.project_name || '-')}</td>
+            <td class="text-sm event-detail">${formatEventSummary(e)}</td>
         </tr>
     `).join('');
+}
+
+function eventStatusBadge(status) {
+    const colors = {
+        'success': 'complete',
+        'error': 'error',
+        'warning': 'warning',
+        'info': 'active'
+    };
+    return `<span class="status"><span class="status-dot ${colors[status] || 'pending'}"></span>${escapeHtml(status)}</span>`;
+}
+
+function eventTypeIcon(type) {
+    const icons = {
+        'session_start': '🚀',
+        'session_end': '🏁',
+        'compact': '📦',
+        'port_start': '▶️',
+        'port_end': '✅',
+        'error': '❌',
+        'warning': '⚠️'
+    };
+    return icons[type] || '📝';
+}
+
+function formatEventSummary(event) {
+    if (!event.parsed_data) return '-';
+    const data = event.parsed_data;
+    const parts = [];
+
+    if (data.title) parts.push(escapeHtml(data.title));
+    if (data.reason) parts.push(`reason: ${escapeHtml(data.reason)}`);
+    if (data.duration) parts.push(`${escapeHtml(data.duration)}`);
+    if (data.tokens) parts.push(`${formatNumber(data.tokens)} tokens`);
+    if (data.message) parts.push(escapeHtml(data.message.substring(0, 50)));
+
+    return parts.length > 0 ? parts.join(' | ') : '-';
+}
+
+function updateHistoryPagination(total) {
+    const totalPages = Math.ceil(total / historyLimit);
+    const pageInfo = document.getElementById('history-page-info');
+    const prevBtn = document.getElementById('history-prev');
+    const nextBtn = document.getElementById('history-next');
+
+    pageInfo.textContent = `Page ${historyPage + 1} of ${totalPages || 1}`;
+    prevBtn.disabled = historyPage === 0;
+    nextBtn.disabled = historyPage >= totalPages - 1;
+}
+
+function historyPrevPage() {
+    if (historyPage > 0) {
+        historyPage--;
+        loadEventHistory();
+    }
+}
+
+function historyNextPage() {
+    const totalPages = Math.ceil(historyTotal / historyLimit);
+    if (historyPage < totalPages - 1) {
+        historyPage++;
+        loadEventHistory();
+    }
+}
+
+function debounceHistorySearch(value) {
+    if (historySearchTimeout) clearTimeout(historySearchTimeout);
+    historySearchTimeout = setTimeout(() => {
+        historyPage = 0;
+        loadEventHistory();
+    }, 300);
+}
+
+async function exportHistory(format) {
+    const eventType = document.getElementById('history-event-type')?.value || '';
+    const project = document.getElementById('history-project')?.value || '';
+    const dateRange = document.getElementById('history-date-range')?.value || '7d';
+    const search = document.getElementById('history-search')?.value || '';
+
+    const params = new URLSearchParams();
+    params.set('format', format);
+    if (eventType) params.set('event_type', eventType);
+    if (project) params.set('project', project);
+    if (search) params.set('search', search);
+
+    // Date range
+    const now = new Date();
+    if (dateRange === 'today') {
+        params.set('start_date', now.toISOString().split('T')[0]);
+    } else if (dateRange === '7d') {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 7);
+        params.set('start_date', d.toISOString().split('T')[0]);
+    } else if (dateRange === '30d') {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 30);
+        params.set('start_date', d.toISOString().split('T')[0]);
+    }
+
+    try {
+        const response = await fetch(`/api/history/export?${params.toString()}`);
+        if (!response.ok) throw new Error('Export failed');
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `history-export.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast(`Exported as ${format.toUpperCase()}`);
+    } catch (err) {
+        showToast('Export failed', true);
+    }
+}
+
+// Legacy loadHistory for session daily summary (keep for reference)
+async function loadHistory() {
+    await initHistoryFilters();
+    await loadEventHistory();
 }
 
 // Ports

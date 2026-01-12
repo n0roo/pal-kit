@@ -1026,3 +1026,136 @@ body {
         grid-template-columns: repeat(2, 1fr);
     }
 }
+
+/* History Filters */
+.filters-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.filter-group label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.filter-group select,
+.filter-group input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    min-width: 150px;
+}
+
+.filter-group.search {
+    flex: 1;
+    min-width: 200px;
+}
+
+.filter-group.search input {
+    width: 100%;
+}
+
+/* History Stats */
+.history-stats {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.history-stats span:first-child {
+    font-weight: 500;
+    color: var(--text);
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding: 1rem;
+}
+
+.pagination button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#history-page-info {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* Event Detail Cell */
+.event-detail {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Tab Header with Actions */
+.tab-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.tab-header h2 {
+    margin: 0;
+}
+
+.tab-header .header-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Toast Notification */
+.toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--secondary);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    z-index: 2000;
+    animation: slideUp 0.3s ease;
+}
+
+.toast.error {
+    background: var(--error);
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(1rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}

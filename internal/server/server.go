@@ -18,6 +18,7 @@ import (
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/docs"
 	"github.com/n0roo/pal-kit/internal/escalation"
+	"github.com/n0roo/pal-kit/internal/history"
 	"github.com/n0roo/pal-kit/internal/lock"
 	"github.com/n0roo/pal-kit/internal/manifest"
 	"github.com/n0roo/pal-kit/internal/pipeline"
@@ -70,6 +71,13 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/escalations", s.withCORS(s.handleEscalations))
 	mux.HandleFunc("/api/manifest", s.withCORS(s.handleManifest))
 	mux.HandleFunc("/api/manifest/changes", s.withCORS(s.handleManifestChanges))
+
+	// History API (detailed event log)
+	mux.HandleFunc("/api/history/events", s.withCORS(s.handleHistoryEvents))
+	mux.HandleFunc("/api/history/types", s.withCORS(s.handleHistoryTypes))
+	mux.HandleFunc("/api/history/projects", s.withCORS(s.handleHistoryProjects))
+	mux.HandleFunc("/api/history/stats", s.withCORS(s.handleHistoryStats))
+	mux.HandleFunc("/api/history/export", s.withCORS(s.handleHistoryExport))
 
 	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -761,4 +769,182 @@ func countByStatus(files []manifest.TrackedFile, status string) int {
 		}
 	}
 	return count
+}
+
+// handleHistoryEvents returns detailed event log
+func (s *Server) handleHistoryEvents(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	// Parse filter parameters
+	filter := history.Filter{}
+
+	if v := r.URL.Query().Get("session_id"); v != "" {
+		filter.SessionID = v
+	}
+	if v := r.URL.Query().Get("event_type"); v != "" {
+		filter.EventType = v
+	}
+	if v := r.URL.Query().Get("project"); v != "" {
+		filter.ProjectRoot = v
+	}
+	if v := r.URL.Query().Get("search"); v != "" {
+		filter.Search = v
+	}
+	if v := r.URL.Query().Get("start_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.StartDate = t
+		}
+	}
+	if v := r.URL.Query().Get("end_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.EndDate = t.Add(24*time.Hour - time.Second) // End of day
+		}
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if l, err := strconv.Atoi(v); err == nil && l > 0 {
+			filter.Limit = l
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if o, err := strconv.Atoi(v); err == nil && o >= 0 {
+			filter.Offset = o
+		}
+	}
+
+	svc := history.NewService(database)
+	events, total, err := svc.List(filter)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"events": events,
+		"total":  total,
+		"limit":  filter.Limit,
+		"offset": filter.Offset,
+	})
+}
+
+// handleHistoryTypes returns available event types
+func (s *Server) handleHistoryTypes(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := history.NewService(database)
+	types, err := svc.GetEventTypes()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, types)
+}
+
+// handleHistoryProjects returns available projects
+func (s *Server) handleHistoryProjects(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := history.NewService(database)
+	projects, err := svc.GetProjects()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, projects)
+}
+
+// handleHistoryStats returns history statistics
+func (s *Server) handleHistoryStats(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := history.NewService(database)
+	stats, err := svc.GetStats()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, stats)
+}
+
+// handleHistoryExport exports history in JSON or CSV format
+func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	// Parse filter (same as handleHistoryEvents)
+	filter := history.Filter{}
+	if v := r.URL.Query().Get("session_id"); v != "" {
+		filter.SessionID = v
+	}
+	if v := r.URL.Query().Get("event_type"); v != "" {
+		filter.EventType = v
+	}
+	if v := r.URL.Query().Get("project"); v != "" {
+		filter.ProjectRoot = v
+	}
+	if v := r.URL.Query().Get("search"); v != "" {
+		filter.Search = v
+	}
+	if v := r.URL.Query().Get("start_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.StartDate = t
+		}
+	}
+	if v := r.URL.Query().Get("end_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.EndDate = t.Add(24*time.Hour - time.Second)
+		}
+	}
+	filter.Limit = 10000 // Max export limit
+
+	svc := history.NewService(database)
+	format := r.URL.Query().Get("format")
+
+	switch format {
+	case "csv":
+		data, err := svc.ExportCSV(filter)
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=history.csv")
+		w.Write([]byte(data))
+
+	default: // JSON
+		data, err := svc.ExportJSON(filter)
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=history.json")
+		w.Write(data)
+	}
 }
