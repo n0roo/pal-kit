@@ -3,8 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/n0roo/pal-kit/internal/agent"
 	"github.com/n0roo/pal-kit/internal/config"
@@ -13,8 +17,11 @@ import (
 )
 
 var (
-	installForce         bool
+	installForce          bool
 	installImportExisting bool
+	installBin            bool
+	installZsh            bool
+	installBinPath        string
 )
 
 var installCmd = &cobra.Command{
@@ -29,6 +36,11 @@ var installCmd = &cobra.Command{
   ├── conventions/     # 전역 컨벤션
   └── templates/       # CLAUDE.md 템플릿 등
 
+바이너리 설치:
+  --bin              /usr/local/bin에 복사 (sudo 필요)
+  --bin-path <path>  지정 경로에 복사
+  --zsh              ~/.zshrc에 PATH 추가
+
 설치 후 프로젝트에서 'pal init' 명령으로 초기화할 수 있습니다.
 `,
 	RunE: runInstall,
@@ -38,6 +50,9 @@ func init() {
 	rootCmd.AddCommand(installCmd)
 	installCmd.Flags().BoolVar(&installForce, "force", false, "기존 설치 덮어쓰기")
 	installCmd.Flags().BoolVar(&installImportExisting, "import-existing", false, "기존 프로젝트 DB 마이그레이션")
+	installCmd.Flags().BoolVar(&installBin, "bin", false, "/usr/local/bin에 바이너리 복사")
+	installCmd.Flags().BoolVar(&installZsh, "zsh", false, "~/.zshrc에 PATH 추가")
+	installCmd.Flags().StringVar(&installBinPath, "bin-path", "", "바이너리 설치 경로 지정")
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
@@ -92,13 +107,26 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		imported = importExistingProjects(dbPath)
 	}
 
+	// 8. 바이너리 설치 (선택)
+	var binInstalled string
+	if installBin || installBinPath != "" || installZsh {
+		var err error
+		binInstalled, err = installBinary()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️ 바이너리 설치 실패: %v\n", err)
+		} else if binInstalled != "" {
+			created = append(created, binInstalled)
+		}
+	}
+
 	// 결과 출력
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
-			"status":   "installed",
-			"path":     globalDir,
-			"created":  created,
-			"imported": imported,
+			"status":       "installed",
+			"path":         globalDir,
+			"created":      created,
+			"imported":     imported,
+			"bin_installed": binInstalled,
 		})
 	}
 
@@ -238,4 +266,127 @@ func importExistingProjects(dbPath string) int {
 	// 현재는 placeholder
 	_ = dbPath
 	return 0
+}
+
+// installBinary installs the pal binary to system path
+func installBinary() (string, error) {
+	// Get current executable path
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("실행 파일 경로 확인 실패: %w", err)
+	}
+
+	// Resolve symlink
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return "", fmt.Errorf("심볼릭 링크 해석 실패: %w", err)
+	}
+
+	// Determine target path
+	var targetPath string
+	if installBinPath != "" {
+		targetPath = filepath.Join(installBinPath, "pal")
+	} else if installBin {
+		targetPath = "/usr/local/bin/pal"
+	} else if installZsh {
+		// Install to ~/.local/bin and add to PATH
+		homeDir, _ := os.UserHomeDir()
+		localBin := filepath.Join(homeDir, ".local", "bin")
+		os.MkdirAll(localBin, 0755)
+		targetPath = filepath.Join(localBin, "pal")
+
+		// Add to .zshrc
+		if err := addToZshrc(localBin); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️ .zshrc 수정 실패: %v\n", err)
+		}
+	}
+
+	if targetPath == "" {
+		return "", nil
+	}
+
+	// Check if source and target are the same
+	if execPath == targetPath {
+		return targetPath, nil
+	}
+
+	// Copy binary
+	if err := copyBinary(execPath, targetPath); err != nil {
+		// Try with sudo for /usr/local/bin
+		if strings.HasPrefix(targetPath, "/usr/local/bin") && runtime.GOOS != "windows" {
+			fmt.Println("관리자 권한이 필요합니다...")
+			cmd := exec.Command("sudo", "cp", execPath, targetPath)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				return "", fmt.Errorf("sudo 복사 실패: %w", err)
+			}
+			// Set permissions
+			exec.Command("sudo", "chmod", "+x", targetPath).Run()
+			return targetPath, nil
+		}
+		return "", fmt.Errorf("복사 실패: %w", err)
+	}
+
+	// Set executable permission
+	os.Chmod(targetPath, 0755)
+
+	return targetPath, nil
+}
+
+// copyBinary copies a file from src to dst
+func copyBinary(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Ensure directory exists
+	os.MkdirAll(filepath.Dir(dst), 0755)
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
+
+// addToZshrc adds a path to .zshrc if not already present
+func addToZshrc(binPath string) error {
+	homeDir, _ := os.UserHomeDir()
+	zshrcPath := filepath.Join(homeDir, ".zshrc")
+
+	// Read existing content
+	content, err := os.ReadFile(zshrcPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Check if already added
+	exportLine := fmt.Sprintf("export PATH=\"%s:$PATH\"", binPath)
+	if strings.Contains(string(content), binPath) {
+		return nil // Already added
+	}
+
+	// Append to .zshrc
+	f, err := os.OpenFile(zshrcPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	comment := "\n# PAL Kit\n"
+	if _, err := f.WriteString(comment + exportLine + "\n"); err != nil {
+		return err
+	}
+
+	fmt.Println("✅ ~/.zshrc에 PATH 추가됨")
+	fmt.Println("   새 터미널을 열거나 'source ~/.zshrc' 실행")
+
+	return nil
 }
