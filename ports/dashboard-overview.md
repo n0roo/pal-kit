@@ -9,7 +9,7 @@
 | 항목 | 값 |
 |------|-----|
 | ID | dashboard-overview |
-| 상태 | draft |
+| 상태 | complete |
 | 우선순위 | high |
 | 의존성 | - |
 | 예상 복잡도 | medium |
@@ -130,11 +130,46 @@
 
 ## 완료 기준
 
-- [ ] 모든 카드가 클릭 시 모달 표시
-- [ ] 모달에서 상세 탭으로 이동 + 필터 적용 동작
-- [ ] Pipelines → Workflows 명칭 변경 완료
-- [ ] 메트릭 카드 4개 분리 완료
+- [x] 모든 카드가 클릭 시 모달 표시
+- [x] 모달에서 상세 탭으로 이동 + 필터 적용 동작
+- [x] Pipelines → Workflows 명칭 변경 완료
+- [x] 메트릭 카드 4개 분리 완료
 
 ---
 
-<!-- pal:port:status=draft -->
+## 완료 요약
+
+### 구현된 기능
+
+1. **Overview 카드 리디자인**
+   - Active Sessions / Completed Sessions 분리
+   - Ports 카드 추가 (상태별 breakdown)
+   - Workflows 카드 (Pipelines에서 명칭 변경)
+
+2. **Metrics 카드 분리**
+   - Tokens 카드 (총 토큰 사용량)
+   - Cost 카드 (예상 비용, 하이라이트 표시)
+   - Time 카드 (총 작업 시간)
+   - Escalations 카드 (미해결 건수, 경고 표시)
+
+3. **showOverviewModal 구현**
+   - 각 카드 클릭 시 모달 팝업
+   - 유형별 상세 정보 표시 (세션 목록, 포트 상태별 그룹, 토큰 breakdown 등)
+   - 모달에서 세션 상세 조회 연결
+
+4. **TUI 업데이트**
+   - Pipelines → Workflows 명칭 변경
+   - Status 탭의 Workflows 박스 표시
+
+### 수정된 파일
+
+| 파일 | 설명 |
+|------|------|
+| internal/server/static/index.html | Overview 레이아웃 리디자인 |
+| internal/server/static/style.css | 새 CSS 클래스 추가 |
+| internal/server/static/app.js | showOverviewModal, loadWorkflows |
+| internal/tui/tui.go | Workflows 명칭 변경 |
+
+---
+
+<!-- pal:port:status=complete -->

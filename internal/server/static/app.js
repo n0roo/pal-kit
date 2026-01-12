@@ -39,11 +39,232 @@ function switchTab(tab) {
 function initModal() {
     const modal = document.getElementById('session-modal');
     const closeBtn = modal.querySelector('.modal-close');
-    
+
     closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.classList.add('hidden');
     });
+}
+
+// Overview Modal - shows detailed lists for each card type
+async function showOverviewModal(type) {
+    const modal = document.getElementById('session-modal');
+    const body = document.getElementById('session-modal-body');
+    const header = modal.querySelector('.modal-header h3');
+
+    let content = '';
+
+    switch (type) {
+        case 'active-sessions': {
+            header.textContent = 'Active Sessions';
+            const data = await fetchAPI('sessions?status=active');
+            if (!data || data.length === 0) {
+                content = '<div class="empty-state">No active sessions</div>';
+            } else {
+                content = `
+                    <div class="children-list">
+                        ${data.map(s => `
+                            <div class="child-item" onclick="showSessionDetail('${s.id}')">
+                                ${statusBadge(s.status)}
+                                <span>${escapeHtml(s.id)}</span>
+                                <span class="muted">${escapeHtml(s.title || '')}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            break;
+        }
+        case 'completed-sessions': {
+            header.textContent = 'Completed Sessions';
+            const data = await fetchAPI('sessions?status=complete&limit=20');
+            if (!data || data.length === 0) {
+                content = '<div class="empty-state">No completed sessions</div>';
+            } else {
+                content = `
+                    <div class="children-list">
+                        ${data.map(s => `
+                            <div class="child-item" onclick="showSessionDetail('${s.id}')">
+                                ${statusBadge(s.status)}
+                                <span>${escapeHtml(s.id)}</span>
+                                <span class="muted">${escapeHtml(s.title || '')}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            break;
+        }
+        case 'ports': {
+            header.textContent = 'Ports';
+            const data = await fetchAPI('ports');
+            if (!data || data.length === 0) {
+                content = '<div class="empty-state">No ports</div>';
+            } else {
+                const running = data.filter(p => p.status === 'running');
+                const complete = data.filter(p => p.status === 'complete');
+                const pending = data.filter(p => p.status === 'pending' || p.status === 'draft');
+
+                content = '';
+                if (running.length > 0) {
+                    content += `<h4>Running (${running.length})</h4><div class="children-list">${running.map(p => `
+                        <div class="child-item">
+                            ${statusBadge(p.status)}
+                            <span>${escapeHtml(p.id)}</span>
+                            <span class="muted">${escapeHtml(p.title || '')}</span>
+                        </div>
+                    `).join('')}</div>`;
+                }
+                if (complete.length > 0) {
+                    content += `<h4>Complete (${complete.length})</h4><div class="children-list">${complete.map(p => `
+                        <div class="child-item">
+                            ${statusBadge(p.status)}
+                            <span>${escapeHtml(p.id)}</span>
+                            <span class="muted">${escapeHtml(p.title || '')}</span>
+                        </div>
+                    `).join('')}</div>`;
+                }
+                if (pending.length > 0) {
+                    content += `<h4>Pending (${pending.length})</h4><div class="children-list">${pending.map(p => `
+                        <div class="child-item">
+                            ${statusBadge(p.status)}
+                            <span>${escapeHtml(p.id)}</span>
+                            <span class="muted">${escapeHtml(p.title || '')}</span>
+                        </div>
+                    `).join('')}</div>`;
+                }
+            }
+            break;
+        }
+        case 'workflows': {
+            header.textContent = 'Workflows';
+            const data = await fetchAPI('pipelines');
+            if (!data || data.length === 0) {
+                content = '<div class="empty-state">No workflows</div>';
+            } else {
+                content = `
+                    <div class="children-list">
+                        ${data.map(p => `
+                            <div class="child-item">
+                                ${statusBadge(p.status)}
+                                <span>${escapeHtml(p.id)}</span>
+                                <span class="muted">${escapeHtml(p.name || '')}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            break;
+        }
+        case 'tokens': {
+            header.textContent = 'Token Usage';
+            const data = await fetchAPI('sessions/stats');
+            if (!data) {
+                content = '<div class="empty-state">No data</div>';
+            } else {
+                content = `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <label>Input Tokens</label>
+                            <span>${formatNumber(data.total_input_tokens || 0)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Output Tokens</label>
+                            <span>${formatNumber(data.total_output_tokens || 0)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Cache Read</label>
+                            <span>${formatNumber(data.total_cache_read_tokens || 0)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Cache Create</label>
+                            <span>${formatNumber(data.total_cache_create_tokens || 0)}</span>
+                        </div>
+                        <div class="detail-item highlight">
+                            <label>Total</label>
+                            <span>${formatNumber((data.total_input_tokens || 0) + (data.total_output_tokens || 0))}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            break;
+        }
+        case 'cost': {
+            header.textContent = 'Cost Breakdown';
+            const data = await fetchAPI('sessions/stats');
+            if (!data) {
+                content = '<div class="empty-state">No data</div>';
+            } else {
+                content = `
+                    <div class="detail-grid">
+                        <div class="detail-item highlight">
+                            <label>Total Cost</label>
+                            <span>$${(data.total_cost_usd || 0).toFixed(4)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Sessions</label>
+                            <span>${data.total_sessions || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Avg per Session</label>
+                            <span>$${data.total_sessions ? ((data.total_cost_usd || 0) / data.total_sessions).toFixed(4) : '0.0000'}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            break;
+        }
+        case 'time': {
+            header.textContent = 'Time Summary';
+            const data = await fetchAPI('sessions/stats');
+            if (!data) {
+                content = '<div class="empty-state">No data</div>';
+            } else {
+                content = `
+                    <div class="detail-grid">
+                        <div class="detail-item highlight">
+                            <label>Total Time</label>
+                            <span>${formatDuration(data.total_duration_secs || 0)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Sessions</label>
+                            <span>${data.total_sessions || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <label>Avg per Session</label>
+                            <span>${formatDuration(data.total_sessions ? Math.floor((data.total_duration_secs || 0) / data.total_sessions) : 0)}</span>
+                        </div>
+                    </div>
+                `;
+            }
+            break;
+        }
+        case 'escalations': {
+            header.textContent = 'Escalations';
+            const data = await fetchAPI('escalations');
+            if (!data || data.length === 0) {
+                content = '<div class="empty-state">No escalations</div>';
+            } else {
+                content = `
+                    <div class="children-list">
+                        ${data.map(e => `
+                            <div class="child-item">
+                                ${statusBadge(e.status)}
+                                <span>${escapeHtml(e.title || e.id)}</span>
+                                <span class="muted">${escapeHtml(e.message || '')}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            break;
+        }
+        default:
+            content = '<div class="empty-state">Unknown type</div>';
+    }
+
+    body.innerHTML = content;
+    modal.classList.remove('hidden');
 }
 
 // Current session for event filtering
@@ -273,7 +494,7 @@ async function loadAllData() {
         loadSessions(),
         loadHistory(),
         loadPorts(),
-        loadPipelines(),
+        loadWorkflows(),
         loadDocs(),
         loadConventions(),
         loadAgents()
@@ -285,12 +506,18 @@ async function loadAllData() {
 async function loadStatus() {
     const data = await fetchAPI('status');
     if (!data) return;
-    
+
     setStatValue('sessions-active', data.sessions?.active ?? 0);
     setStatValue('ports-total', data.ports?.total ?? 0);
-    setStatValue('pipelines-running', data.pipelines?.running ?? 0);
+    setStatValue('workflows-running', data.pipelines?.running ?? 0);
     setStatValue('escalations-open', data.escalations?.open ?? 0);
-    
+
+    // Ports breakdown
+    const running = data.ports?.running ?? 0;
+    const complete = data.ports?.complete ?? 0;
+    const pending = data.ports?.pending ?? 0;
+    setStatValue('ports-breakdown', `${running} running, ${complete} complete, ${pending} pending`);
+
     document.getElementById('project-root').textContent = data.project_root || '';
 }
 
@@ -380,16 +607,16 @@ async function loadPorts() {
     `).join('');
 }
 
-// Pipelines
-async function loadPipelines() {
+// Workflows (formerly Pipelines)
+async function loadWorkflows() {
     const data = await fetchAPI('pipelines');
-    const tbody = document.getElementById('pipelines-table');
-    
+    const tbody = document.getElementById('workflows-table');
+
     if (!data || data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No pipelines</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No workflows</td></tr>';
         return;
     }
-    
+
     tbody.innerHTML = data.map(p => `
         <tr>
             <td>${statusBadge(p.status || 'unknown')}</td>
