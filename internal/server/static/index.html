@@ -18,6 +18,7 @@
 
         <nav class="nav">
             <button class="nav-btn active" data-tab="status">Overview</button>
+            <button class="nav-btn" data-tab="projects">Projects</button>
             <button class="nav-btn" data-tab="sessions">Sessions</button>
             <button class="nav-btn" data-tab="history">History</button>
             <button class="nav-btn" data-tab="ports">Ports</button>
@@ -103,6 +104,17 @@
                 </div>
             </section>
 
+            <!-- Projects Tab -->
+            <section id="tab-projects" class="tab-content">
+                <div class="tab-header">
+                    <h2>Projects</h2>
+                    <div class="search-box">
+                        <input type="text" id="projects-search" placeholder="Search projects..." oninput="filterProjects(this.value)">
+                    </div>
+                </div>
+                <div class="cards-grid" id="projects-grid"></div>
+            </section>
+
             <!-- Sessions Tab -->
             <section id="tab-sessions" class="tab-content">
                 <h2>Sessions</h2>
@@ -185,7 +197,12 @@
 
             <!-- Documents Tab -->
             <section id="tab-docs" class="tab-content">
-                <h2>Documents</h2>
+                <div class="tab-header">
+                    <h2>Documents</h2>
+                    <div class="search-box">
+                        <input type="text" id="docs-search" placeholder="Search documents..." oninput="filterDocs(this.value)">
+                    </div>
+                </div>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
@@ -247,6 +264,36 @@
         </div>
     </div>
 
+    <!-- Document Viewer Modal -->
+    <div id="doc-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="doc-modal-title">Document</h3>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="copyDocument()" title="Copy to clipboard">Copy</button>
+                    <button class="btn btn-secondary" onclick="downloadDocument()" title="Download file">Download</button>
+                    <button class="modal-close">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body doc-viewer" id="doc-modal-body">
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Detail Modal -->
+    <div id="project-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="project-modal-title">Project Detail</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="project-modal-body">
+            </div>
+        </div>
+    </div>
+
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

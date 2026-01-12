@@ -8,8 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initRefresh();
     initModal();
+    initDocModal();
+    initProjectModal();
     loadAllData();
-    
+
     // Auto refresh every 10 seconds
     refreshInterval = setInterval(loadAllData, 10000);
 });
@@ -44,6 +46,275 @@ function initModal() {
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.classList.add('hidden');
     });
+}
+
+// Document Modal
+let currentDocPath = '';
+let currentDocContent = '';
+
+function initDocModal() {
+    const modal = document.getElementById('doc-modal');
+    const closeBtn = modal.querySelector('.modal-close');
+
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+}
+
+// Show document in viewer
+async function showDocViewer(path) {
+    const modal = document.getElementById('doc-modal');
+    const title = document.getElementById('doc-modal-title');
+    const body = document.getElementById('doc-modal-body');
+
+    title.textContent = path;
+    body.innerHTML = '<div class="empty-state">Loading...</div>';
+    modal.classList.remove('hidden');
+
+    try {
+        const data = await fetchAPI(`docs/content?path=${encodeURIComponent(path)}`);
+        if (!data || !data.content) {
+            body.innerHTML = '<div class="empty-state">Failed to load document</div>';
+            return;
+        }
+
+        currentDocPath = path;
+        currentDocContent = data.content;
+
+        // Determine file type and render
+        const ext = path.split('.').pop().toLowerCase();
+        if (ext === 'md') {
+            // Markdown rendering
+            if (typeof marked !== 'undefined') {
+                body.innerHTML = marked.parse(data.content);
+                // Add copy buttons to code blocks
+                addCodeBlockCopyButtons(body);
+            } else {
+                body.innerHTML = `<pre class="yaml-viewer">${escapeHtml(data.content)}</pre>`;
+            }
+        } else if (ext === 'yaml' || ext === 'yml') {
+            // YAML - syntax highlighted
+            body.innerHTML = `<pre class="yaml-viewer">${highlightYaml(data.content)}</pre>`;
+        } else {
+            // Plain text
+            body.innerHTML = `<pre class="yaml-viewer">${escapeHtml(data.content)}</pre>`;
+        }
+    } catch (err) {
+        body.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+// Add copy buttons to code blocks
+function addCodeBlockCopyButtons(container) {
+    const preBlocks = container.querySelectorAll('pre');
+    preBlocks.forEach(pre => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-block-wrapper';
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+
+        const btn = document.createElement('button');
+        btn.className = 'code-copy-btn';
+        btn.textContent = 'Copy';
+        btn.onclick = () => {
+            const code = pre.querySelector('code') || pre;
+            navigator.clipboard.writeText(code.textContent).then(() => {
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            });
+        };
+        wrapper.appendChild(btn);
+    });
+}
+
+// Simple YAML syntax highlighting
+function highlightYaml(content) {
+    return escapeHtml(content)
+        .replace(/^(\s*)([\w-]+):/gm, '$1<span style="color:#7C3AED">$2</span>:')
+        .replace(/:\s*(&quot;[^&]*&quot;|&#39;[^&]*&#39;)/g, ': <span style="color:#10B981">$1</span>')
+        .replace(/:\s*(\d+)/g, ': <span style="color:#F59E0B">$1</span>')
+        .replace(/:\s*(true|false)/gi, ': <span style="color:#F59E0B">$1</span>')
+        .replace(/#.*$/gm, '<span style="color:#6B7280">$&</span>');
+}
+
+// Copy entire document
+function copyDocument() {
+    if (!currentDocContent) {
+        showToast('No document loaded', true);
+        return;
+    }
+
+    navigator.clipboard.writeText(currentDocContent).then(() => {
+        showToast('Document copied to clipboard');
+    }).catch(() => {
+        showToast('Failed to copy', true);
+    });
+}
+
+// Download document
+function downloadDocument() {
+    if (!currentDocPath || !currentDocContent) {
+        showToast('No document loaded', true);
+        return;
+    }
+
+    const filename = currentDocPath.split('/').pop();
+    const blob = new Blob([currentDocContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(`Downloaded ${filename}`);
+}
+
+// Show toast notification
+function showToast(message, isError = false) {
+    const existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = `toast${isError ? ' error' : ''}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// Project Modal
+function initProjectModal() {
+    const modal = document.getElementById('project-modal');
+    const closeBtn = modal.querySelector('.modal-close');
+
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.classList.add('hidden');
+    });
+}
+
+// Show project detail
+async function showProjectDetail(root) {
+    const modal = document.getElementById('project-modal');
+    const title = document.getElementById('project-modal-title');
+    const body = document.getElementById('project-modal-body');
+
+    title.textContent = 'Loading...';
+    body.innerHTML = '<div class="empty-state">Loading project details...</div>';
+    modal.classList.remove('hidden');
+
+    try {
+        const data = await fetchAPI(`projects/detail?root=${encodeURIComponent(root)}`);
+        if (!data) {
+            body.innerHTML = '<div class="empty-state">Failed to load project</div>';
+            return;
+        }
+
+        title.textContent = data.name || 'Unknown Project';
+
+        // Build detail HTML
+        let configSection = '';
+        if (data.config) {
+            const agents = data.config.agents || {};
+            const settings = data.config.settings || {};
+            configSection = `
+                <h4>Configuration</h4>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <label>Version</label>
+                        <span>${escapeHtml(data.config.version || '-')}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Workflow</label>
+                        <span class="workflow-badge">${escapeHtml(data.config.workflow || '-')}</span>
+                    </div>
+                    <div class="detail-item full-width">
+                        <label>Core Agents</label>
+                        <span>${(agents.core || []).map(a => `<span class="tool-tag">${escapeHtml(a)}</span>`).join('') || '-'}</span>
+                    </div>
+                    <div class="detail-item full-width">
+                        <label>Workers</label>
+                        <span>${(agents.workers || []).length > 0 ? (agents.workers || []).map(a => `<span class="tool-tag">${escapeHtml(a)}</span>`).join('') : '-'}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        let sessionsSection = '';
+        if (data.sessions && data.sessions.length > 0) {
+            sessionsSection = `
+                <h4>Recent Sessions (${data.sessions.length})</h4>
+                <div class="children-list">
+                    ${data.sessions.map(s => `
+                        <div class="child-item" onclick="showSessionDetail('${s.id}'); document.getElementById('project-modal').classList.add('hidden');">
+                            ${statusBadge(s.status)}
+                            <span>${escapeHtml(s.id)}</span>
+                            <span class="muted">${escapeHtml(s.title || '')}</span>
+                            <span class="muted text-sm">$${(s.cost || 0).toFixed(4)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        let portsSection = '';
+        if (data.ports && data.ports.length > 0) {
+            portsSection = `
+                <h4>Ports (${data.ports.length})</h4>
+                <div class="children-list">
+                    ${data.ports.map(p => `
+                        <div class="child-item">
+                            ${statusBadge(p.status)}
+                            <span>${escapeHtml(p.id)}</span>
+                            <span class="muted">${escapeHtml(p.title || '')}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        body.innerHTML = `
+            <div class="detail-grid">
+                <div class="detail-item full-width">
+                    <label>Path</label>
+                    <span class="text-sm">${escapeHtml(data.root)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Description</label>
+                    <span>${escapeHtml(data.description || '-')}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Last Active</label>
+                    <span>${formatDate(data.last_active)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Sessions</label>
+                    <span>${data.session_count || 0}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Total Tokens</label>
+                    <span>${formatNumber(data.total_tokens || 0)}</span>
+                </div>
+                <div class="detail-item highlight">
+                    <label>Total Cost</label>
+                    <span>$${(data.total_cost || 0).toFixed(4)}</span>
+                </div>
+                <div class="detail-item">
+                    <label>Created</label>
+                    <span>${formatDate(data.created_at)}</span>
+                </div>
+            </div>
+            ${configSection}
+            ${sessionsSection}
+            ${portsSection}
+        `;
+    } catch (err) {
+        body.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+    }
 }
 
 // Overview Modal - shows detailed lists for each card type
@@ -491,6 +762,7 @@ async function loadAllData() {
     await Promise.all([
         loadStatus(),
         loadSessionStats(),
+        loadProjects(),
         loadSessions(),
         loadHistory(),
         loadPorts(),
@@ -537,6 +809,74 @@ async function loadSessionStats() {
 function setStatValue(id, value) {
     const el = document.getElementById(`stat-${id}`);
     if (el) el.textContent = value;
+}
+
+// Projects
+let allProjects = [];
+
+async function loadProjects() {
+    const data = await fetchAPI('projects');
+    const grid = document.getElementById('projects-grid');
+
+    if (!data || data.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><div class="icon">📁</div><p>No projects registered</p></div>';
+        allProjects = [];
+        return;
+    }
+
+    allProjects = data;
+    renderProjects(data);
+}
+
+function renderProjects(projects) {
+    const grid = document.getElementById('projects-grid');
+
+    if (!projects || projects.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><div class="icon">📁</div><p>No projects found</p></div>';
+        return;
+    }
+
+    grid.innerHTML = projects.map(p => `
+        <div class="project-card" onclick="showProjectDetail('${escapeHtml(p.root)}')">
+            <div class="project-header">
+                <h3>📁 ${escapeHtml(p.name || 'Unknown')}</h3>
+                <span class="muted text-sm">${formatDate(p.last_active)}</span>
+            </div>
+            <p class="project-desc">${escapeHtml(p.description || 'No description')}</p>
+            <div class="project-stats">
+                <div class="project-stat">
+                    <span class="stat-icon">📊</span>
+                    <span>${p.session_count || 0} sessions</span>
+                </div>
+                <div class="project-stat">
+                    <span class="stat-icon">🔢</span>
+                    <span>${formatNumber(p.total_tokens || 0)} tokens</span>
+                </div>
+                <div class="project-stat highlight">
+                    <span class="stat-icon">💰</span>
+                    <span>$${(p.total_cost || 0).toFixed(2)}</span>
+                </div>
+            </div>
+            <div class="project-path">${escapeHtml(p.root)}</div>
+        </div>
+    `).join('');
+}
+
+function filterProjects(query) {
+    if (!query) {
+        renderProjects(allProjects);
+        return;
+    }
+
+    const lowerQuery = query.toLowerCase();
+    const filtered = allProjects.filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        const root = (p.root || '').toLowerCase();
+        return name.includes(lowerQuery) || desc.includes(lowerQuery) || root.includes(lowerQuery);
+    });
+
+    renderProjects(filtered);
 }
 
 // Sessions
@@ -628,17 +968,32 @@ async function loadWorkflows() {
 }
 
 // Documents
+let allDocs = [];
+
 async function loadDocs() {
     const data = await fetchAPI('docs');
     const tbody = document.getElementById('docs-table');
-    
+
     if (!data || data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No documents</td></tr>';
+        allDocs = [];
         return;
     }
-    
-    tbody.innerHTML = data.map(d => `
-        <tr>
+
+    allDocs = data;
+    renderDocs(data);
+}
+
+function renderDocs(docs) {
+    const tbody = document.getElementById('docs-table');
+
+    if (!docs || docs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No documents found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = docs.map(d => `
+        <tr onclick="showDocViewer('${escapeHtml(d.relative_path || d.path)}')" style="cursor:pointer">
             <td>${statusBadge(d.status || 'unknown')}</td>
             <td>${escapeHtml(d.relative_path || d.path || '-')}</td>
             <td>${escapeHtml(d.type || '-')}</td>
@@ -646,6 +1001,22 @@ async function loadDocs() {
             <td class="text-sm muted">${formatDate(d.modified_at)}</td>
         </tr>
     `).join('');
+}
+
+function filterDocs(query) {
+    if (!query) {
+        renderDocs(allDocs);
+        return;
+    }
+
+    const lowerQuery = query.toLowerCase();
+    const filtered = allDocs.filter(d => {
+        const path = (d.relative_path || d.path || '').toLowerCase();
+        const type = (d.type || '').toLowerCase();
+        return path.includes(lowerQuery) || type.includes(lowerQuery);
+    });
+
+    renderDocs(filtered);
 }
 
 // Conventions

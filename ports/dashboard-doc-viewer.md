@@ -9,7 +9,7 @@
 | 항목 | 값 |
 |------|-----|
 | ID | dashboard-doc-viewer |
-| 상태 | draft |
+| 상태 | complete |
 | 우선순위 | medium |
 | 의존성 | - |
 | 예상 복잡도 | medium |
@@ -152,12 +152,54 @@ Documents, Conventions, Agents 문서를 읽고, 복사하고, 다운로드할 �
 
 ## 완료 기준
 
-- [ ] docs/, conventions/, agents/ 파일 탐색 가능
-- [ ] Markdown/YAML 파일 렌더링
-- [ ] 코드 블록 복사 동작
-- [ ] 전체 문서 복사 동작
-- [ ] 파일 다운로드 동작
+- [x] docs/, conventions/, agents/ 파일 탐색 가능
+- [x] Markdown/YAML 파일 렌더링
+- [x] 코드 블록 복사 동작
+- [x] 전체 문서 복사 동작
+- [x] 파일 다운로드 동작
 
 ---
 
-<!-- pal:port:status=draft -->
+## 완료 요약
+
+### 구현된 기능
+
+1. **문서 뷰어 API**
+   - `/api/docs/content?path=...` 엔드포인트 추가
+   - 문서 내용 및 메타데이터 반환
+
+2. **문서 뷰어 모달**
+   - 대형 모달 (modal-large)
+   - Copy/Download 버튼
+   - 반응형 디자인
+
+3. **Markdown 렌더링**
+   - marked.js 라이브러리 사용
+   - 코드 블록 구문 강조
+   - 테이블, 인용구, 링크 지원
+   - 코드 블록별 복사 버튼
+
+4. **YAML 뷰어**
+   - 구문 하이라이팅 (키, 값, 숫자, 불린, 주석)
+
+5. **복사/다운로드**
+   - 전체 문서 클립보드 복사
+   - 원본 파일 다운로드
+   - 토스트 알림
+
+6. **검색 기능**
+   - Documents 탭에 검색 박스 추가
+   - 경로/타입 기준 실시간 필터링
+
+### 수정된 파일
+
+| 파일 | 설명 |
+|------|------|
+| internal/server/server.go | /api/docs/content 엔드포인트 추가 |
+| internal/server/static/index.html | 문서 뷰어 모달, 검색 박스 추가 |
+| internal/server/static/style.css | 문서 뷰어 스타일, 검색 박스 스타일 |
+| internal/server/static/app.js | showDocViewer, filterDocs, copy/download 함수 |
+
+---
+
+<!-- pal:port:status=complete -->
