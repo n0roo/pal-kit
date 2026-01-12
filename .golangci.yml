@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+run:
+  timeout: 5m
+
+issues:
+  exclude-rules:
+    # Exclude Korean error messages from staticcheck ST1005
+    - linters:
+        - staticcheck
+      text: "ST1005"
+    # Exclude unnecessary fmt.Sprintf from staticcheck S1039
+    - linters:
+        - staticcheck
+      text: "S1039"

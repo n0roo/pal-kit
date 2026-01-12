@@ -241,8 +241,8 @@ func TestCanExecutePort(t *testing.T) {
 	}
 
 	// port-001 완료 후 port-002 실행 가능
-	svc.UpdatePortStatus("pipeline-1", "port-001", StatusComplete)
-	canExec, pending, _ = svc.CanExecutePort("pipeline-1", "port-002")
+	_ = svc.UpdatePortStatus("pipeline-1", "port-001", StatusComplete)
+	canExec, _, _ = svc.CanExecutePort("pipeline-1", "port-002")
 	if !canExec {
 		t.Error("port-002가 실행 불가능으로 판단됨")
 	}

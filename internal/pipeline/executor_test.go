@@ -2,11 +2,8 @@ package pipeline
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/n0roo/pal-kit/internal/db"
 )
 
 func TestNewExecutor(t *testing.T) {
@@ -319,35 +316,4 @@ func TestExecutor_RealExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("실제 실행 실패: %v", err)
 	}
-}
-
-// setupTestDB는 pipeline_test.go에서 이미 정의됨
-// 여기서는 사용만 함
-func setupTestDBForExecutor(t *testing.T) (*db.DB, func()) {
-	t.Helper()
-
-	tmpDir, err := os.MkdirTemp("", "pal-test-*")
-	if err != nil {
-		t.Fatalf("임시 디렉토리 생성 실패: %v", err)
-	}
-
-	dbPath := filepath.Join(tmpDir, "test.db")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("DB 열기 실패: %v", err)
-	}
-
-	if err := database.Init(); err != nil {
-		database.Close()
-		os.RemoveAll(tmpDir)
-		t.Fatalf("DB 초기화 실패: %v", err)
-	}
-
-	cleanup := func() {
-		database.Close()
-		os.RemoveAll(tmpDir)
-	}
-
-	return database, cleanup
 }

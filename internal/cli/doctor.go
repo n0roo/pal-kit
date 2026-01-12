@@ -107,7 +107,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		checks = append(checks, CheckResult{
 			Name:    "Global Install",
 			Status:  "error",
-			Message: fmt.Sprintf("설치되지 않음 - 'pal install' 실행 필요"),
+			Message: "설치되지 않음 - 'pal install' 실행 필요",
 		})
 	}
 

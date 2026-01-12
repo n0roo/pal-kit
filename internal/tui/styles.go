@@ -8,8 +8,7 @@ var (
 	secondaryColor = lipgloss.Color("#10B981") // Green
 	warningColor   = lipgloss.Color("#F59E0B") // Yellow
 	errorColor     = lipgloss.Color("#EF4444") // Red
-	mutedColor     = lipgloss.Color("#6B7280") // Gray
-	bgColor        = lipgloss.Color("#1F2937") // Dark gray
+	mutedColor = lipgloss.Color("#6B7280") // Gray
 
 	// Base styles
 	titleStyle = lipgloss.NewStyle().
@@ -25,11 +24,6 @@ var (
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(primaryColor).
-			Padding(0, 1)
-
-	activeBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(secondaryColor).
 			Padding(0, 1)
 
 	// Status styles
@@ -62,33 +56,12 @@ var (
 			Foreground(mutedColor).
 			MarginTop(1)
 
-	// List item styles
-	listItemStyle = lipgloss.NewStyle().
-			PaddingLeft(2)
-
-	selectedItemStyle = lipgloss.NewStyle().
-				PaddingLeft(1).
-				Foreground(secondaryColor).
-				SetString("▸ ")
-
 	// Progress bar
 	progressFullStyle = lipgloss.NewStyle().
 				Foreground(secondaryColor)
 
 	progressEmptyStyle = lipgloss.NewStyle().
 				Foreground(mutedColor)
-
-	// Header/Footer
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Background(primaryColor).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Padding(0, 1).
-			Width(80)
-
-	footerStyle = lipgloss.NewStyle().
-			Foreground(mutedColor).
-			Padding(0, 1)
 )
 
 // RenderProgressBar renders a progress bar

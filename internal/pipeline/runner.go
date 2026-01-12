@@ -171,9 +171,9 @@ pal pipeline status "$PIPELINE_ID" running
 `, pipelineID, pipelineID, projectRoot)
 
 	for _, group := range plan.Groups {
-		script += fmt.Sprintf("\n# ═══════════════════════════════════════\n")
+		script += "\n# ═══════════════════════════════════════\n"
 		script += fmt.Sprintf("# Group %d (%d ports)\n", group.Order, len(group.Ports))
-		script += fmt.Sprintf("# ═══════════════════════════════════════\n\n")
+		script += "# ═══════════════════════════════════════\n\n"
 
 		if len(group.Ports) == 1 {
 			// 단일 포트: 순차 실행
@@ -203,13 +203,13 @@ echo "✅ Group complete"
 		}
 	}
 
-	script += fmt.Sprintf(`
+	script += `
 # ═══════════════════════════════════════
 # Pipeline Complete
 # ═══════════════════════════════════════
 pal pipeline status "$PIPELINE_ID" complete
 echo "🎉 Pipeline complete: $PIPELINE_ID"
-`)
+`
 
 	return script, nil
 }

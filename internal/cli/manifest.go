@@ -82,17 +82,17 @@ func init() {
 
 func getManifestService() (*manifest.Service, error) {
 	if !config.IsInstalled() {
-		return nil, fmt.Errorf("PAL Kit이 설치되지 않았습니다. 'pal install' 실행하세요.")
+		return nil, fmt.Errorf("pal kit이 설치되지 않았습니다, 'pal install' 실행하세요")
 	}
 
 	projectRoot := config.FindProjectRoot()
 	if projectRoot == "" {
-		return nil, fmt.Errorf("프로젝트 디렉토리가 아닙니다. 'pal init' 실행하세요.")
+		return nil, fmt.Errorf("프로젝트 디렉토리가 아닙니다, 'pal init' 실행하세요")
 	}
 
 	// .claude 디렉토리 존재 여부 확인
 	if _, err := os.Stat(config.ProjectDir(projectRoot)); os.IsNotExist(err) {
-		return nil, fmt.Errorf("프로젝트가 초기화되지 않았습니다. 'pal init' 실행하세요.")
+		return nil, fmt.Errorf("프로젝트가 초기화되지 않았습니다, 'pal init' 실행하세요")
 	}
 
 	database, err := db.Open(config.GlobalDBPath())

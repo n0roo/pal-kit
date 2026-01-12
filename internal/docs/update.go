@@ -129,7 +129,7 @@ func generateConfiguredClaudeMD(cfg *config.ProjectConfig) string {
 	sb.WriteString("---\n\n")
 
 	// 메타데이터
-	sb.WriteString(fmt.Sprintf("<!-- pal:config:status=configured -->\n"))
+	sb.WriteString("<!-- pal:config:status=configured -->\n")
 	sb.WriteString(fmt.Sprintf("<!-- pal:workflow:%s -->\n", cfg.Workflow.Type))
 	sb.WriteString(fmt.Sprintf("<!-- pal:updated:%s -->\n", time.Now().Format("2006-01-02")))
 

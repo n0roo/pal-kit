@@ -73,7 +73,7 @@ func runUsageSync(cmd *cobra.Command, args []string) error {
 
 	projectsDir := usage.GetProjectsDir()
 	if projectsDir == "" {
-		return fmt.Errorf("Claude projects 디렉토리를 찾을 수 없습니다")
+		return fmt.Errorf("claude projects 디렉토리를 찾을 수 없습니다")
 	}
 
 	synced, err := svc.SyncFromJSONL(projectsDir)
