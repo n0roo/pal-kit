@@ -9,7 +9,7 @@
 | 항목 | 값 |
 |------|-----|
 | ID | agent-package-system |
-| 상태 | draft |
+| 상태 | complete |
 | 우선순위 | high |
 | 의존성 | agent-convention-split |
 | 예상 복잡도 | high |
@@ -87,41 +87,44 @@ package:
 
 ### 스키마 정의
 
-- [ ] 패키지 YAML 스키마 정의
-- [ ] 스키마 검증 로직 구현
-- [ ] 상속(extends) 로직 구현
+- [x] 패키지 YAML 스키마 정의
+- [x] 스키마 검증 로직 구현
+- [x] 상속(extends) 로직 구현
 
 ### 기본 패키지 작성
 
-- [ ] PA-Layered Backend 패키지
-  - [ ] tech 섹션 (Kotlin, Spring, JPA, JOOQ)
-  - [ ] architecture 섹션 (L1, LM, L2, L3)
-  - [ ] methodology 섹션 (port_driven, cqs, event_driven)
-  - [ ] workers 목록 (6종)
-  - [ ] core_overrides (architect, builder)
-- [ ] PA-Layered Frontend 패키지
-  - [ ] tech 섹션 (TypeScript, React, Next.js, MUI, Tailwind)
-  - [ ] architecture 섹션 (API, Query, Feature, Component)
-  - [ ] workers 목록 (5종)
+- [x] PA-Layered Backend 패키지
+  - [x] tech 섹션 (Kotlin, Spring, JPA, JOOQ)
+  - [x] architecture 섹션 (L1, LM, L2, L3)
+  - [x] methodology 섹션 (port_driven, cqs, event_driven)
+  - [x] workers 목록 (6종)
+  - [x] core_overrides (architect, builder)
+- [x] PA-Layered Frontend 패키지
+  - [x] tech 섹션 (TypeScript, React, Next.js, MUI, Tailwind)
+  - [x] architecture 섹션 (API, Query, Feature, Component)
+  - [x] workers 목록 (5종)
+- [x] PA-Layered Base 패키지 (상속 기반)
 
 ### 패키지 로딩
 
-- [ ] 패키지 파일 로딩 (`.pal/packages/`)
-- [ ] 전역 패키지 로딩 (`~/.pal/packages/`)
-- [ ] 상속 병합 로직
-- [ ] 패키지 캐싱
+- [x] 패키지 파일 로딩 (`packages/`)
+- [x] 전역 패키지 로딩 (`~/.pal/packages/`)
+- [x] 상속 병합 로직
+- [x] 순환 참조 감지
 
 ### CLI 명령어
 
-- [ ] `pal package list` - 사용 가능한 패키지 목록
-- [ ] `pal package show <id>` - 패키지 상세 정보
-- [ ] `pal package use <id>` - 프로젝트에 패키지 적용
-- [ ] `pal package create <id>` - 새 패키지 생성
+- [x] `pal package list` - 사용 가능한 패키지 목록
+- [x] `pal package show <id>` - 패키지 상세 정보
+- [x] `pal package use <id>` - 프로젝트에 패키지 적용
+- [x] `pal package create <id>` - 새 패키지 생성
+- [x] `pal package validate [id]` - 패키지 검증
+- [x] `pal package workers <id>` - 워커 목록 조회
 
 ### 문서화
 
-- [ ] 사용자 정의 패키지 가이드
-- [ ] 패키지 작성 템플릿
+- [x] 사용자 정의 패키지 가이드 (docs/PACKAGE-GUIDE.md)
+- [x] 패키지 작성 템플릿 (가이드 내 포함)
 
 ---
 
@@ -139,12 +142,34 @@ package:
 
 ## 완료 기준
 
-- [ ] 패키지 스키마 정의 및 검증 동작
-- [ ] 기본 패키지 2종 로딩 성공
-- [ ] 상속(extends) 동작 확인
-- [ ] CLI 명령어 4종 동작
-- [ ] 사용자 정의 패키지 가이드 작성
+- [x] 패키지 스키마 정의 및 검증 동작
+- [x] 기본 패키지 3종 로딩 성공 (base, backend, frontend)
+- [x] 상속(extends) 동작 확인
+- [x] CLI 명령어 6종 동작
+- [x] 사용자 정의 패키지 가이드 작성
 
 ---
 
-<!-- pal:port:status=draft -->
+## 완료 요약
+
+### 생성된 파일
+
+| 파일 | 설명 |
+|------|------|
+| `internal/package/package.go` | 패키지 스키마 및 서비스 |
+| `internal/package/package_test.go` | 패키지 테스트 |
+| `internal/cli/package.go` | CLI 명령어 |
+| `packages/pa-layered-base.yaml` | Base 패키지 |
+| `packages/pa-layered-backend.yaml` | Backend 패키지 |
+| `packages/pa-layered-frontend.yaml` | Frontend 패키지 |
+| `docs/PACKAGE-GUIDE.md` | 사용자 가이드 |
+
+### 수정된 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `internal/config/paths.go` | GlobalPackagesDir, GlobalPalDir 추가 |
+
+---
+
+<!-- pal:port:status=complete -->

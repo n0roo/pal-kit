@@ -1,0 +1,69 @@
+package:
+  id: pa-layered-backend
+  name: PA-Layered Backend
+  version: "1.0.0"
+  description: |
+    PA-Layered 아키텍처 기반 백엔드 패키지.
+    Port/Adapter 패턴과 CQS를 적용한 레이어드 아키텍처.
+
+  tech:
+    language: kotlin
+    frameworks:
+      - spring-boot
+      - spring-data-jpa
+      - jooq
+    build_tool: gradle
+    runtime: jvm
+
+  architecture:
+    name: PA-Layered
+    layers:
+      - L1  # Domain (Entity, Repository, Command/Query Service)
+      - LM  # Shared Composition (Coordinator, Listener)
+      - L2  # Feature Composition (CompositeService)
+      - L3  # Router (Controller, API Gateway)
+    conventions_ref: conventions/agents/workers/backend/
+    dependency_rule: |
+      L1 → Infrastructure (OK)
+      L1 → L1 (NO - ID 참조만)
+      LM → L1 (OK)
+      LM → LM (단방향만)
+      LM → L2 (NO)
+      L2 → L1 (OK)
+      L2 → LM (OK)
+      L2 → L2 (NO - Event만)
+      L3 → L2 (OK)
+      L3 → L1 Query (OK)
+
+  methodology:
+    port_driven: true
+    cqs: true
+    event_driven: true
+
+  workers:
+    - entity-worker      # L1 JPA/ORM Entity
+    - cache-worker       # L1 Redis Cache
+    - document-worker    # L1 MongoDB Document
+    - service-worker     # LM/L2 Service Composition
+    - router-worker      # L3 API Controller
+    - test-worker        # Test Coverage
+
+  core_overrides:
+    architect:
+      conventions_ref: conventions/agents/core/architect.md
+      validation_rules:
+        - pa-layered-dependency
+        - cqs-separation
+        - naming-convention
+
+    builder:
+      port_templates:
+        - templates/pa-layered/tpl-server-l1-port.md
+        - templates/pa-layered/tpl-server-lm-port.md
+        - templates/pa-layered/tpl-server-l2-port.md
+        - templates/pa-layered/tpl-server-l3-port.md
+
+    tester:
+      conventions_ref: conventions/agents/core/tester.md
+      validation_rules:
+        - coverage-by-layer

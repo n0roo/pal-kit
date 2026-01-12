@@ -184,12 +184,48 @@ PAL Kit 에이전트 시스템과 Claude Code를 연계하여,
 
 ## 완료 기준
 
-- [ ] 컨텍스트 로딩 순서 구현 및 동작 확인
-- [ ] 포트 타입 → 워커 자동 매핑 동작
-- [ ] Hook 연동으로 자동 컨텍스트 갱신
-- [ ] CLAUDE.md 자동 업데이트 동작
-- [ ] `pal context show` 명령어 동작
+- [x] 컨텍스트 로딩 순서 구현 및 동작 확인
+- [x] 포트 타입 → 워커 자동 매핑 동작
+- [x] Hook 연동으로 자동 컨텍스트 갱신
+- [x] CLAUDE.md 자동 업데이트 동작
+- [x] `pal context show` 명령어 동작
 
 ---
 
-<!-- pal:port:status=draft -->
+## 완료 요약
+
+### 구현된 파일
+
+| 파일 | 설명 |
+|------|------|
+| internal/worker/mapper.go | 포트 타입 → 워커 매핑 서비스 |
+| internal/prompt/builder.go | 컨텍스트 빌드 및 프롬프트 구성 |
+| internal/context/claude.go | Claude Code 통합 서비스 |
+| internal/cli/worker_cmd.go | 워커 관리 CLI 명령어 |
+| docs/claude-integration.md | 연계 가이드 문서 |
+
+### 주요 기능
+
+1. **워커 자동 매핑**
+   - 포트 명세의 port_type 분석
+   - tech 힌트 기반 워커 선택
+   - L1/L2/L3/LM 레이어별 매핑
+
+2. **컨텍스트 로딩**
+   - 6단계 순서 로딩 (CLAUDE.md → 아키텍처 → 워커 공통 → 워커 개별 → 포트 → 프롬프트)
+   - 토큰 예산 관리
+   - 압축 모드 지원
+
+3. **CLI 명령어**
+   - `pal worker list/show/switch/map`
+   - `pal context claude/reload`
+   - `pal hook port-start/port-end` 강화
+
+4. **CLAUDE.md 통합**
+   - 활성 워커 섹션 자동 생성/정리
+   - 체크리스트 표시
+   - 토큰 정보 표시
+
+---
+
+<!-- pal:port:status=complete -->
