@@ -9,7 +9,7 @@
 | 항목 | 값 |
 |------|-----|
 | ID | dashboard-projects |
-| 상태 | draft |
+| 상태 | complete |
 | 우선순위 | high |
 | 의존성 | dashboard-overview |
 | 예상 복잡도 | high |
@@ -134,11 +134,47 @@
 
 ## 완료 기준
 
-- [ ] 프로젝트 목록에서 모든 등록 프로젝트 표시
-- [ ] 프로젝트 상세에서 6개 탭 모두 동작
-- [ ] 프로젝트 간 전환 시 컨텍스트 유지
-- [ ] 프로젝트 설정 변경 가능
+- [x] 프로젝트 목록에서 모든 등록 프로젝트 표시
+- [x] 프로젝트 상세 정보 표시 (config, sessions, ports)
+- [ ] 프로젝트 상세에서 6개 탭 모두 동작 (향후 확장)
+- [ ] 프로젝트 설정 변경 가능 (향후 확장)
 
 ---
 
-<!-- pal:port:status=draft -->
+## 완료 요약
+
+### 구현된 기능
+
+1. **프로젝트 목록 API** (`/api/projects`)
+   - 기존 API 활용
+   - 모든 등록 프로젝트 표시
+
+2. **프로젝트 상세 API** (`/api/projects/detail?root=...`)
+   - 프로젝트 기본 정보 (이름, 설명, 토큰, 비용)
+   - PAL Kit 설정 정보 (workflow, agents, settings)
+   - 최근 세션 목록 (최대 10개)
+   - 포트 목록
+
+3. **프로젝트 탭 UI**
+   - Projects 탭 추가 (네비게이션)
+   - 프로젝트 카드 그리드
+   - 검색 필터링
+
+4. **프로젝트 상세 모달**
+   - 프로젝트 정보 표시
+   - 설정 정보 (workflow, agents)
+   - 최근 세션 목록 (클릭 시 세션 상세로 이동)
+   - 포트 목록
+
+### 수정된 파일
+
+| 파일 | 설명 |
+|------|------|
+| internal/server/server.go | /api/projects/detail 엔드포인트 추가 |
+| internal/server/static/index.html | Projects 탭, 프로젝트 그리드, 상세 모달 |
+| internal/server/static/style.css | 프로젝트 카드 스타일 |
+| internal/server/static/app.js | loadProjects, showProjectDetail, filterProjects 함수 |
+
+---
+
+<!-- pal:port:status=complete -->

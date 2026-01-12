@@ -18,6 +18,7 @@
 
         <nav class="nav">
             <button class="nav-btn active" data-tab="status">Overview</button>
+            <button class="nav-btn" data-tab="projects">Projects</button>
             <button class="nav-btn" data-tab="sessions">Sessions</button>
             <button class="nav-btn" data-tab="history">History</button>
             <button class="nav-btn" data-tab="ports">Ports</button>
@@ -103,6 +104,17 @@
                 </div>
             </section>
 
+            <!-- Projects Tab -->
+            <section id="tab-projects" class="tab-content">
+                <div class="tab-header">
+                    <h2>Projects</h2>
+                    <div class="search-box">
+                        <input type="text" id="projects-search" placeholder="Search projects..." oninput="filterProjects(this.value)">
+                    </div>
+                </div>
+                <div class="cards-grid" id="projects-grid"></div>
+            </section>
+
             <!-- Sessions Tab -->
             <section id="tab-sessions" class="tab-content">
                 <h2>Sessions</h2>
@@ -127,22 +139,71 @@
 
             <!-- History Tab -->
             <section id="tab-history" class="tab-content">
-                <h2>Session History</h2>
+                <div class="tab-header">
+                    <h2>Event History</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="exportHistory('json')">Export JSON</button>
+                        <button class="btn btn-secondary" onclick="exportHistory('csv')">Export CSV</button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="filters-row">
+                    <div class="filter-group">
+                        <label>Event Type</label>
+                        <select id="history-event-type" onchange="loadEventHistory()">
+                            <option value="">All Types</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Project</label>
+                        <select id="history-project" onchange="loadEventHistory()">
+                            <option value="">All Projects</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Date Range</label>
+                        <select id="history-date-range" onchange="loadEventHistory()">
+                            <option value="today">Today</option>
+                            <option value="7d" selected>Last 7 days</option>
+                            <option value="30d">Last 30 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                    </div>
+                    <div class="filter-group search">
+                        <label>Search</label>
+                        <input type="text" id="history-search" placeholder="Search events..." onkeyup="debounceHistorySearch(this.value)">
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="history-stats">
+                    <span id="history-total">0 events</span>
+                    <span id="history-stats-detail"></span>
+                </div>
+
+                <!-- Events Table -->
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Date</th>
-                                <th>Sessions</th>
-                                <th>Completed</th>
-                                <th>Input Tokens</th>
-                                <th>Output Tokens</th>
-                                <th>Duration</th>
-                                <th>Cost (USD)</th>
+                                <th>Status</th>
+                                <th>Time</th>
+                                <th>Event Type</th>
+                                <th>Session</th>
+                                <th>Project</th>
+                                <th>Details</th>
                             </tr>
                         </thead>
                         <tbody id="history-table"></tbody>
                     </table>
+                </div>
+
+                <!-- Pagination -->
+                <div class="pagination" id="history-pagination">
+                    <button class="btn btn-secondary" id="history-prev" onclick="historyPrevPage()" disabled>Previous</button>
+                    <span id="history-page-info">Page 1</span>
+                    <button class="btn btn-secondary" id="history-next" onclick="historyNextPage()">Next</button>
                 </div>
             </section>
 
@@ -157,6 +218,9 @@
                                 <th>ID</th>
                                 <th>Title</th>
                                 <th>Session</th>
+                                <th>Duration</th>
+                                <th>Tokens</th>
+                                <th>Cost</th>
                                 <th>Created</th>
                             </tr>
                         </thead>
@@ -185,7 +249,12 @@
 
             <!-- Documents Tab -->
             <section id="tab-docs" class="tab-content">
-                <h2>Documents</h2>
+                <div class="tab-header">
+                    <h2>Documents</h2>
+                    <div class="search-box">
+                        <input type="text" id="docs-search" placeholder="Search documents..." oninput="filterDocs(this.value)">
+                    </div>
+                </div>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
@@ -247,6 +316,36 @@
         </div>
     </div>
 
+    <!-- Document Viewer Modal -->
+    <div id="doc-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="doc-modal-title">Document</h3>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="copyDocument()" title="Copy to clipboard">Copy</button>
+                    <button class="btn btn-secondary" onclick="downloadDocument()" title="Download file">Download</button>
+                    <button class="modal-close">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body doc-viewer" id="doc-modal-body">
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Detail Modal -->
+    <div id="project-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="project-modal-title">Project Detail</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="project-modal-body">
+            </div>
+        </div>
+    </div>
+
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

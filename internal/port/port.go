@@ -10,14 +10,19 @@ import (
 
 // Port represents a work unit specification
 type Port struct {
-	ID          string
-	Title       sql.NullString
-	Status      string
-	SessionID   sql.NullString
-	FilePath    sql.NullString
-	CreatedAt   time.Time
-	StartedAt   sql.NullTime
-	CompletedAt sql.NullTime
+	ID           string
+	Title        sql.NullString
+	Status       string
+	SessionID    sql.NullString
+	FilePath     sql.NullString
+	CreatedAt    time.Time
+	StartedAt    sql.NullTime
+	CompletedAt  sql.NullTime
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+	DurationSecs int64
+	AgentID      sql.NullString
 }
 
 // Status constants
@@ -124,11 +129,13 @@ func (s *Service) AssignSession(portID, sessionID string) error {
 func (s *Service) Get(id string) (*Port, error) {
 	var p Port
 	err := s.db.QueryRow(`
-		SELECT id, title, status, session_id, file_path, created_at, started_at, completed_at
+		SELECT id, title, status, session_id, file_path, created_at, started_at, completed_at,
+		       input_tokens, output_tokens, cost_usd, duration_secs, agent_id
 		FROM ports WHERE id = ?
 	`, id).Scan(
 		&p.ID, &p.Title, &p.Status, &p.SessionID, &p.FilePath,
 		&p.CreatedAt, &p.StartedAt, &p.CompletedAt,
+		&p.InputTokens, &p.OutputTokens, &p.CostUSD, &p.DurationSecs, &p.AgentID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -144,7 +151,8 @@ func (s *Service) Get(id string) (*Port, error) {
 // List returns ports with optional filters
 func (s *Service) List(status string, limit int) ([]Port, error) {
 	query := `
-		SELECT id, title, status, session_id, file_path, created_at, started_at, completed_at
+		SELECT id, title, status, session_id, file_path, created_at, started_at, completed_at,
+		       input_tokens, output_tokens, cost_usd, duration_secs, agent_id
 		FROM ports
 	`
 
@@ -172,6 +180,7 @@ func (s *Service) List(status string, limit int) ([]Port, error) {
 		if err := rows.Scan(
 			&p.ID, &p.Title, &p.Status, &p.SessionID, &p.FilePath,
 			&p.CreatedAt, &p.StartedAt, &p.CompletedAt,
+			&p.InputTokens, &p.OutputTokens, &p.CostUSD, &p.DurationSecs, &p.AgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -186,6 +195,66 @@ func (s *Service) Delete(id string) error {
 	result, err := s.db.Exec(`DELETE FROM ports WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("포트 삭제 실패: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("포트 '%s'을(를) 찾을 수 없습니다", id)
+	}
+
+	return nil
+}
+
+// UpdateUsage updates token usage and cost for a port
+func (s *Service) UpdateUsage(id string, inputTokens, outputTokens int64, cost float64) error {
+	result, err := s.db.Exec(`
+		UPDATE ports
+		SET input_tokens = input_tokens + ?,
+		    output_tokens = output_tokens + ?,
+		    cost_usd = cost_usd + ?
+		WHERE id = ?
+	`, inputTokens, outputTokens, cost, id)
+
+	if err != nil {
+		return fmt.Errorf("사용량 업데이트 실패: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("포트 '%s'을(를) 찾을 수 없습니다", id)
+	}
+
+	return nil
+}
+
+// SetUsage sets absolute token usage and cost for a port
+func (s *Service) SetUsage(id string, inputTokens, outputTokens int64, cost float64, durationSecs int64) error {
+	result, err := s.db.Exec(`
+		UPDATE ports
+		SET input_tokens = ?,
+		    output_tokens = ?,
+		    cost_usd = ?,
+		    duration_secs = ?
+		WHERE id = ?
+	`, inputTokens, outputTokens, cost, durationSecs, id)
+
+	if err != nil {
+		return fmt.Errorf("사용량 설정 실패: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("포트 '%s'을(를) 찾을 수 없습니다", id)
+	}
+
+	return nil
+}
+
+// SetAgentID sets the agent ID for a port
+func (s *Service) SetAgentID(id, agentID string) error {
+	result, err := s.db.Exec(`UPDATE ports SET agent_id = ? WHERE id = ?`, agentID, id)
+	if err != nil {
+		return fmt.Errorf("에이전트 ID 설정 실패: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()

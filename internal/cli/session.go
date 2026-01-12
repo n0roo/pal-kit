@@ -78,6 +78,16 @@ ID를 지정하지 않으면 모든 루트 세션의 트리를 출력합니다.`
 	RunE: runSessionTree,
 }
 
+var sessionCleanupCmd = &cobra.Command{
+	Use:   "cleanup",
+	Short: "좀비 세션 정리",
+	Long: `오래된 running 상태의 세션들을 정리합니다.
+기본적으로 24시간 이상 running 상태인 세션을 complete로 변경합니다.`,
+	RunE: runSessionCleanup,
+}
+
+var sessionCleanupHours int
+
 func init() {
 	rootCmd.AddCommand(sessionCmd)
 	sessionCmd.AddCommand(sessionStartCmd)
@@ -86,6 +96,7 @@ func init() {
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionTreeCmd)
+	sessionCmd.AddCommand(sessionCleanupCmd)
 
 	sessionStartCmd.Flags().StringVar(&sessionPortID, "port", "", "포트 ID")
 	sessionStartCmd.Flags().StringVar(&sessionTitle, "title", "", "세션 제목")
@@ -98,6 +109,8 @@ func init() {
 	sessionListCmd.Flags().IntVar(&sessionLimit, "limit", 20, "결과 수 제한")
 
 	sessionTreeCmd.Flags().IntVar(&sessionLimit, "limit", 10, "루트 세션 수 제한")
+
+	sessionCleanupCmd.Flags().IntVar(&sessionCleanupHours, "hours", 24, "정리 기준 시간 (시간)")
 }
 
 func getSessionService() (*session.Service, func(), error) {
@@ -536,4 +549,34 @@ func printSessionTree(node *session.SessionNode, prefix string, isLast bool, isR
 	for i, child := range node.Children {
 		printSessionTree(&child, childPrefix, i == len(node.Children)-1, false)
 	}
+}
+
+func runSessionCleanup(cmd *cobra.Command, args []string) error {
+	svc, cleanup, err := getSessionService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// 좀비 세션 정리
+	cleaned, err := svc.CleanupZombieSessions(sessionCleanupHours)
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"cleaned":   cleaned,
+			"threshold": sessionCleanupHours,
+		})
+		return nil
+	}
+
+	if cleaned == 0 {
+		fmt.Printf("정리할 좀비 세션이 없습니다 (기준: %d시간 이상)\n", sessionCleanupHours)
+	} else {
+		fmt.Printf("✅ %d개의 좀비 세션이 정리되었습니다 (기준: %d시간 이상)\n", cleaned, sessionCleanupHours)
+	}
+
+	return nil
 }

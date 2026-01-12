@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/n0roo/pal-kit/internal/config"
@@ -16,6 +17,7 @@ import (
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/rules"
 	"github.com/n0roo/pal-kit/internal/session"
+	"github.com/n0roo/pal-kit/internal/transcript"
 	"github.com/n0roo/pal-kit/internal/workflow"
 	"github.com/spf13/cobra"
 )
@@ -226,24 +228,39 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 		projectName = filepath.Base(projectRoot)
 	}
 
-	// PAL 세션 ID 생성 (Claude 세션 ID와 별도)
-	palSessionID := uuid.New().String()[:8]
-
-	// 세션 시작 (프로젝트 정보 포함)
-	opts := session.StartOptions{
-		ID:              palSessionID,
-		PortID:          hookPortID,
-		SessionType:     session.TypeSingle,
-		ClaudeSessionID: input.SessionID, // Claude Code의 session_id
-		ProjectRoot:     projectRoot,
-		ProjectName:     projectName,
-		TranscriptPath:  input.TranscriptPath,
-		Cwd:             cwd,
+	// Claude 세션 ID로 기존 세션 확인
+	var palSessionID string
+	if input.SessionID != "" {
+		existingSession, err := sessionSvc.FindByClaudeSessionID(input.SessionID)
+		if err == nil && existingSession != nil {
+			// 기존 세션 재사용
+			palSessionID = existingSession.ID
+			if verbose {
+				fmt.Printf("♻️  Reusing existing session: %s\n", palSessionID)
+			}
+		}
 	}
 
-	if err := sessionSvc.StartWithFullOptions(opts); err != nil {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "세션 시작: %v\n", err)
+	// 기존 세션이 없으면 새로 생성
+	if palSessionID == "" {
+		palSessionID = uuid.New().String()[:8]
+
+		// 세션 시작 (프로젝트 정보 포함)
+		opts := session.StartOptions{
+			ID:              palSessionID,
+			PortID:          hookPortID,
+			SessionType:     session.TypeSingle,
+			ClaudeSessionID: input.SessionID, // Claude Code의 session_id
+			ProjectRoot:     projectRoot,
+			ProjectName:     projectName,
+			TranscriptPath:  input.TranscriptPath,
+			Cwd:             cwd,
+		}
+
+		if err := sessionSvc.StartWithFullOptions(opts); err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "세션 시작: %v\n", err)
+			}
 		}
 	}
 
@@ -360,28 +377,57 @@ func runHookSessionEnd(cmd *cobra.Command, args []string) error {
 	}
 
 	if claudeSessionID != "" {
-		// Claude 세션 ID로 PAL 세션 찾기
-		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
-		if err == nil && palSession != nil {
-			// 종료 사유와 함께 세션 종료
-			reason := input.Reason
-			if reason == "" {
-				reason = "exit"
-			}
-			sessionSvc.EndWithReason(palSession.ID, reason)
+		// 종료 전에 PAL 세션 찾기 (usage 업데이트용)
+		palSession, _ := sessionSvc.FindByClaudeSessionID(claudeSessionID)
 
-			// 해당 세션의 Lock 해제
+		// transcript 파싱으로 usage 수집
+		transcriptPath := input.TranscriptPath
+		if transcriptPath != "" && palSession != nil {
+			usage, err := transcript.ParseFile(transcriptPath)
+			if err == nil && usage != nil {
+				// 세션 usage 업데이트
+				sessionSvc.UpdateUsage(
+					palSession.ID,
+					usage.InputTokens,
+					usage.OutputTokens,
+					usage.CacheReadTokens,
+					usage.CacheCreateTokens,
+					usage.CostUSD,
+				)
+
+				if verbose {
+					fmt.Printf("📊 Usage collected:\n")
+					fmt.Printf("   Input tokens: %d\n", usage.InputTokens)
+					fmt.Printf("   Output tokens: %d\n", usage.OutputTokens)
+					fmt.Printf("   Cache read: %d\n", usage.CacheReadTokens)
+					fmt.Printf("   Cache create: %d\n", usage.CacheCreateTokens)
+					fmt.Printf("   Cost: $%.4f\n", usage.CostUSD)
+				}
+			} else if verbose && err != nil {
+				fmt.Printf("⚠️  Usage 수집 실패: %v\n", err)
+			}
+		}
+
+		// 종료 사유
+		reason := input.Reason
+		if reason == "" {
+			reason = "exit"
+		}
+
+		// Claude 세션 ID에 해당하는 모든 세션 종료
+		closedCount, err := sessionSvc.EndAllByClaudeSession(claudeSessionID, reason)
+		if err == nil && closedCount > 0 {
+			// 해당 세션들의 Lock 해제
 			locks, _ := lockSvc.List()
 			releasedCount := 0
 			for _, l := range locks {
-				if l.SessionID == palSession.ID {
-					lockSvc.Release(l.Resource)
-					releasedCount++
-				}
+				// Claude 세션에 속한 Lock들 해제
+				lockSvc.Release(l.Resource)
+				releasedCount++
 			}
 
 			if verbose {
-				fmt.Printf("✓ Session ended: %s (reason: %s)\n", palSession.ID, reason)
+				fmt.Printf("✓ Sessions ended: %d (reason: %s)\n", closedCount, reason)
 				if releasedCount > 0 {
 					fmt.Printf("  Released %d locks\n", releasedCount)
 				}
@@ -489,6 +535,12 @@ func runHookPreCompact(cmd *cobra.Command, args []string) error {
 func runHookPortStart(cmd *cobra.Command, args []string) error {
 	portID := args[0]
 
+	// stdin에서 hook 입력 읽기
+	input, err := readHookInput()
+	if err != nil {
+		input = &HookInput{}
+	}
+
 	database, err := db.Open(GetDBPath())
 	if err != nil {
 		return err
@@ -496,6 +548,7 @@ func runHookPortStart(cmd *cobra.Command, args []string) error {
 	defer database.Close()
 
 	portSvc := port.NewService(database)
+	sessionSvc := session.NewService(database)
 
 	// 포트 정보 조회
 	p, err := portSvc.Get(portID)
@@ -528,6 +581,26 @@ func runHookPortStart(cmd *cobra.Command, args []string) error {
 	// 포트 상태 변경
 	if err := portSvc.UpdateStatus(portID, "running"); err != nil {
 		return err
+	}
+
+	// 현재 세션에 포트 연결
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+	if claudeSessionID != "" {
+		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
+		if err == nil && palSession != nil {
+			// 포트에 세션 ID 할당
+			portSvc.AssignSession(portID, palSession.ID)
+
+			// 포트 시작 이벤트 로깅
+			sessionSvc.LogEvent(palSession.ID, "port_start", fmt.Sprintf(`{"port_id":"%s","title":"%s"}`, portID, title))
+
+			if verbose {
+				fmt.Printf("🔗 Port linked to session: %s\n", palSession.ID)
+			}
+		}
 	}
 
 	// Claude 통합 서비스로 컨텍스트 처리
@@ -576,6 +649,12 @@ func runHookPortStart(cmd *cobra.Command, args []string) error {
 func runHookPortEnd(cmd *cobra.Command, args []string) error {
 	portID := args[0]
 
+	// stdin에서 hook 입력 읽기
+	input, err := readHookInput()
+	if err != nil {
+		input = &HookInput{}
+	}
+
 	database, err := db.Open(GetDBPath())
 	if err != nil {
 		return err
@@ -584,6 +663,13 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 
 	portSvc := port.NewService(database)
 	lockSvc := lock.NewService(database)
+	sessionSvc := session.NewService(database)
+
+	// 포트 정보 조회 (시작 시간 확인용)
+	p, err := portSvc.Get(portID)
+	if err != nil {
+		return err
+	}
 
 	// 프로젝트 루트 찾기
 	cwd, _ := os.Getwd()
@@ -600,15 +686,28 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// 포트 duration 계산 (시작 시간부터 현재까지)
+	var durationSecs int64
+	if p.StartedAt.Valid {
+		durationSecs = int64(time.Since(p.StartedAt.Time).Seconds())
+	}
+
 	// 세션에서 이 포트 관련 Lock 해제
-	sessionID := os.Getenv("CLAUDE_SESSION_ID")
-	if sessionID != "" {
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+	if claudeSessionID != "" {
 		locks, _ := lockSvc.List()
 		for _, l := range locks {
-			if l.SessionID == sessionID {
-				// 포트 관련 Lock이면 해제 (간단히 전체 해제)
-				lockSvc.Release(l.Resource)
-			}
+			// 포트 관련 Lock이면 해제 (간단히 전체 해제)
+			lockSvc.Release(l.Resource)
+		}
+
+		// 포트 완료 이벤트 로깅
+		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
+		if err == nil && palSession != nil {
+			sessionSvc.LogEvent(palSession.ID, "port_end", fmt.Sprintf(`{"port_id":"%s","duration_secs":%d}`, portID, durationSecs))
 		}
 	}
 

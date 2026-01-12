@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/n0roo/pal-kit/internal/agent"
+	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/convention"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/docs"
 	"github.com/n0roo/pal-kit/internal/escalation"
+	"github.com/n0roo/pal-kit/internal/history"
 	"github.com/n0roo/pal-kit/internal/lock"
 	"github.com/n0roo/pal-kit/internal/manifest"
 	"github.com/n0roo/pal-kit/internal/pipeline"
@@ -54,6 +56,7 @@ func (s *Server) Start() error {
 	// API routes
 	mux.HandleFunc("/api/status", s.withCORS(s.handleStatus))
 	mux.HandleFunc("/api/projects", s.withCORS(s.handleProjects))
+	mux.HandleFunc("/api/projects/detail", s.withCORS(s.handleProjectDetail))
 	mux.HandleFunc("/api/sessions", s.withCORS(s.handleSessions))
 	mux.HandleFunc("/api/sessions/stats", s.withCORS(s.handleSessionStats))
 	mux.HandleFunc("/api/sessions/history", s.withCORS(s.handleSessionHistory))
@@ -62,11 +65,19 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/pipelines", s.withCORS(s.handlePipelines))
 	mux.HandleFunc("/api/agents", s.withCORS(s.handleAgents))
 	mux.HandleFunc("/api/docs", s.withCORS(s.handleDocs))
+	mux.HandleFunc("/api/docs/content", s.withCORS(s.handleDocContent))
 	mux.HandleFunc("/api/conventions", s.withCORS(s.handleConventions))
 	mux.HandleFunc("/api/locks", s.withCORS(s.handleLocks))
 	mux.HandleFunc("/api/escalations", s.withCORS(s.handleEscalations))
 	mux.HandleFunc("/api/manifest", s.withCORS(s.handleManifest))
 	mux.HandleFunc("/api/manifest/changes", s.withCORS(s.handleManifestChanges))
+
+	// History API (detailed event log)
+	mux.HandleFunc("/api/history/events", s.withCORS(s.handleHistoryEvents))
+	mux.HandleFunc("/api/history/types", s.withCORS(s.handleHistoryTypes))
+	mux.HandleFunc("/api/history/projects", s.withCORS(s.handleHistoryProjects))
+	mux.HandleFunc("/api/history/stats", s.withCORS(s.handleHistoryStats))
+	mux.HandleFunc("/api/history/export", s.withCORS(s.handleHistoryExport))
 
 	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -415,6 +426,35 @@ func (s *Server) handleDocs(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, documents)
 }
 
+// handleDocContent returns the content of a specific document
+func (s *Server) handleDocContent(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		s.errorResponse(w, 400, "path parameter required")
+		return
+	}
+
+	svc := docs.NewService(s.config.ProjectRoot)
+	content, err := svc.GetContent(path)
+	if err != nil {
+		s.errorResponse(w, 404, err.Error())
+		return
+	}
+
+	doc, _ := svc.Get(path)
+	response := map[string]interface{}{
+		"path":    path,
+		"content": content,
+	}
+	if doc != nil {
+		response["type"] = doc.Type
+		response["size"] = doc.Size
+		response["modified_at"] = doc.ModifiedAt
+	}
+
+	s.jsonResponse(w, response)
+}
+
 // handleConventions returns convention list
 func (s *Server) handleConventions(w http.ResponseWriter, r *http.Request) {
 	svc := convention.NewService(s.config.ProjectRoot)
@@ -495,6 +535,127 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.jsonResponse(w, projects)
+}
+
+// handleProjectDetail returns detailed project information
+func (s *Server) handleProjectDetail(w http.ResponseWriter, r *http.Request) {
+	root := r.URL.Query().Get("root")
+	if root == "" {
+		s.errorResponse(w, 400, "root parameter required")
+		return
+	}
+
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	// Get project from DB
+	var name string
+	var description, lastActive, createdAt *string
+	var sessionCount, totalTokens int64
+	var totalCost float64
+
+	err = database.QueryRow(`
+		SELECT name, description, last_active, session_count, total_tokens, total_cost, created_at
+		FROM projects WHERE root = ?
+	`, root).Scan(&name, &description, &lastActive, &sessionCount, &totalTokens, &totalCost, &createdAt)
+	if err != nil {
+		s.errorResponse(w, 404, "project not found")
+		return
+	}
+
+	// Get project config if available
+	var configData map[string]interface{}
+	if cfg, err := config.LoadProjectConfig(root); err == nil {
+		configData = map[string]interface{}{
+			"version":  cfg.Version,
+			"workflow": cfg.Workflow.Type,
+			"agents": map[string]interface{}{
+				"core":    cfg.Agents.Core,
+				"workers": cfg.Agents.Workers,
+				"testers": cfg.Agents.Testers,
+			},
+			"settings": map[string]interface{}{
+				"auto_port_create":     cfg.Settings.AutoPortCreate,
+				"require_user_review":  cfg.Settings.RequireUserReview,
+				"auto_test_on_complete": cfg.Settings.AutoTestOnComplete,
+			},
+		}
+	}
+
+	// Get recent sessions for this project
+	rows, err := database.Query(`
+		SELECT id, session_type, title, status, input_tokens, output_tokens,
+		       cost_usd, started_at, ended_at
+		FROM sessions
+		WHERE project_root = ?
+		ORDER BY started_at DESC
+		LIMIT 10
+	`, root)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	var sessions []map[string]interface{}
+	for rows.Next() {
+		var id, sessionType, title, status string
+		var inputTokens, outputTokens int64
+		var cost float64
+		var startTime, endTime *string
+
+		if err := rows.Scan(&id, &sessionType, &title, &status, &inputTokens, &outputTokens, &cost, &startTime, &endTime); err != nil {
+			continue
+		}
+
+		sessions = append(sessions, map[string]interface{}{
+			"id":            id,
+			"type":          sessionType,
+			"title":         title,
+			"status":        status,
+			"input_tokens":  inputTokens,
+			"output_tokens": outputTokens,
+			"cost":          cost,
+			"start_time":    startTime,
+			"end_time":      endTime,
+		})
+	}
+
+	// Get ports for this project
+	portSvc := port.NewService(database)
+	ports, _ := portSvc.List("", 100)
+	var portList []map[string]interface{}
+	for _, p := range ports {
+		var title string
+		if p.Title.Valid {
+			title = p.Title.String
+		}
+		portList = append(portList, map[string]interface{}{
+			"id":     p.ID,
+			"title":  title,
+			"status": p.Status,
+		})
+	}
+
+	result := map[string]interface{}{
+		"root":          root,
+		"name":          name,
+		"description":   description,
+		"last_active":   lastActive,
+		"session_count": sessionCount,
+		"total_tokens":  totalTokens,
+		"total_cost":    totalCost,
+		"created_at":    createdAt,
+		"config":        configData,
+		"sessions":      sessions,
+		"ports":         portList,
+	}
+
+	s.jsonResponse(w, result)
 }
 
 // handleEscalations returns escalation list
@@ -608,4 +769,182 @@ func countByStatus(files []manifest.TrackedFile, status string) int {
 		}
 	}
 	return count
+}
+
+// handleHistoryEvents returns detailed event log
+func (s *Server) handleHistoryEvents(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	// Parse filter parameters
+	filter := history.Filter{}
+
+	if v := r.URL.Query().Get("session_id"); v != "" {
+		filter.SessionID = v
+	}
+	if v := r.URL.Query().Get("event_type"); v != "" {
+		filter.EventType = v
+	}
+	if v := r.URL.Query().Get("project"); v != "" {
+		filter.ProjectRoot = v
+	}
+	if v := r.URL.Query().Get("search"); v != "" {
+		filter.Search = v
+	}
+	if v := r.URL.Query().Get("start_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.StartDate = t
+		}
+	}
+	if v := r.URL.Query().Get("end_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.EndDate = t.Add(24*time.Hour - time.Second) // End of day
+		}
+	}
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if l, err := strconv.Atoi(v); err == nil && l > 0 {
+			filter.Limit = l
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if o, err := strconv.Atoi(v); err == nil && o >= 0 {
+			filter.Offset = o
+		}
+	}
+
+	svc := history.NewService(database)
+	events, total, err := svc.List(filter)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"events": events,
+		"total":  total,
+		"limit":  filter.Limit,
+		"offset": filter.Offset,
+	})
+}
+
+// handleHistoryTypes returns available event types
+func (s *Server) handleHistoryTypes(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := history.NewService(database)
+	types, err := svc.GetEventTypes()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, types)
+}
+
+// handleHistoryProjects returns available projects
+func (s *Server) handleHistoryProjects(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := history.NewService(database)
+	projects, err := svc.GetProjects()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, projects)
+}
+
+// handleHistoryStats returns history statistics
+func (s *Server) handleHistoryStats(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := history.NewService(database)
+	stats, err := svc.GetStats()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, stats)
+}
+
+// handleHistoryExport exports history in JSON or CSV format
+func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	// Parse filter (same as handleHistoryEvents)
+	filter := history.Filter{}
+	if v := r.URL.Query().Get("session_id"); v != "" {
+		filter.SessionID = v
+	}
+	if v := r.URL.Query().Get("event_type"); v != "" {
+		filter.EventType = v
+	}
+	if v := r.URL.Query().Get("project"); v != "" {
+		filter.ProjectRoot = v
+	}
+	if v := r.URL.Query().Get("search"); v != "" {
+		filter.Search = v
+	}
+	if v := r.URL.Query().Get("start_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.StartDate = t
+		}
+	}
+	if v := r.URL.Query().Get("end_date"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			filter.EndDate = t.Add(24*time.Hour - time.Second)
+		}
+	}
+	filter.Limit = 10000 // Max export limit
+
+	svc := history.NewService(database)
+	format := r.URL.Query().Get("format")
+
+	switch format {
+	case "csv":
+		data, err := svc.ExportCSV(filter)
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=history.csv")
+		w.Write([]byte(data))
+
+	default: // JSON
+		data, err := svc.ExportJSON(filter)
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=history.json")
+		w.Write(data)
+	}
 }

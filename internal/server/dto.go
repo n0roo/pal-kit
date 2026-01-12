@@ -2,13 +2,14 @@ package server
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
-	"github.com/n0roo/pal-kit/internal/port"
-	"github.com/n0roo/pal-kit/internal/session"
-	"github.com/n0roo/pal-kit/internal/pipeline"
 	"github.com/n0roo/pal-kit/internal/escalation"
 	"github.com/n0roo/pal-kit/internal/lock"
+	"github.com/n0roo/pal-kit/internal/pipeline"
+	"github.com/n0roo/pal-kit/internal/port"
+	"github.com/n0roo/pal-kit/internal/session"
 )
 
 // Session DTO for JSON response
@@ -147,20 +148,30 @@ func toSessionEventDTOs(events []session.SessionEvent) []SessionEventDTO {
 
 // Port DTO for JSON response
 type PortDTO struct {
-	ID          string `json:"id"`
-	Title       string `json:"title,omitempty"`
-	Status      string `json:"status"`
-	SessionID   string `json:"session_id,omitempty"`
-	FilePath    string `json:"file_path,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	StartedAt   string `json:"started_at,omitempty"`
-	CompletedAt string `json:"completed_at,omitempty"`
+	ID           string  `json:"id"`
+	Title        string  `json:"title,omitempty"`
+	Status       string  `json:"status"`
+	SessionID    string  `json:"session_id,omitempty"`
+	FilePath     string  `json:"file_path,omitempty"`
+	CreatedAt    string  `json:"created_at,omitempty"`
+	StartedAt    string  `json:"started_at,omitempty"`
+	CompletedAt  string  `json:"completed_at,omitempty"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	DurationSecs int64   `json:"duration_secs"`
+	DurationStr  string  `json:"duration_str,omitempty"`
+	AgentID      string  `json:"agent_id,omitempty"`
 }
 
 func toPortDTO(p port.Port) PortDTO {
 	dto := PortDTO{
-		ID:     p.ID,
-		Status: p.Status,
+		ID:           p.ID,
+		Status:       p.Status,
+		InputTokens:  p.InputTokens,
+		OutputTokens: p.OutputTokens,
+		CostUSD:      p.CostUSD,
+		DurationSecs: p.DurationSecs,
 	}
 	if p.Title.Valid {
 		dto.Title = p.Title.String
@@ -171,12 +182,22 @@ func toPortDTO(p port.Port) PortDTO {
 	if p.FilePath.Valid {
 		dto.FilePath = p.FilePath.String
 	}
+	if p.AgentID.Valid {
+		dto.AgentID = p.AgentID.String
+	}
 	dto.CreatedAt = p.CreatedAt.Format(time.RFC3339)
 	if p.StartedAt.Valid {
 		dto.StartedAt = p.StartedAt.Time.Format(time.RFC3339)
 	}
 	if p.CompletedAt.Valid {
 		dto.CompletedAt = p.CompletedAt.Time.Format(time.RFC3339)
+	}
+	// Calculate duration string
+	if dto.DurationSecs > 0 {
+		dto.DurationStr = formatDuration(dto.DurationSecs)
+	} else if p.StartedAt.Valid && p.CompletedAt.Valid {
+		dto.DurationSecs = int64(p.CompletedAt.Time.Sub(p.StartedAt.Time).Seconds())
+		dto.DurationStr = formatDuration(dto.DurationSecs)
 	}
 	return dto
 }
@@ -294,4 +315,17 @@ func nullString(ns sql.NullString) string {
 		return ns.String
 	}
 	return ""
+}
+
+// formatDuration formats seconds into human readable string
+func formatDuration(secs int64) string {
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%dm %ds", secs/60, secs%60)
+	}
+	hours := secs / 3600
+	mins := (secs % 3600) / 60
+	return fmt.Sprintf("%dh %dm", hours, mins)
 }

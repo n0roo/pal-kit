@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 5
+const schemaVersion = 7
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -29,7 +29,12 @@ CREATE TABLE IF NOT EXISTS ports (
     file_path TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     started_at DATETIME,
-    completed_at DATETIME
+    completed_at DATETIME,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT 0,
+    duration_secs INTEGER DEFAULT 0,
+    agent_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_ports_status ON ports(status);
@@ -198,6 +203,51 @@ CREATE INDEX IF NOT EXISTS idx_changes_project ON file_changes(project_root, cha
 CREATE INDEX IF NOT EXISTS idx_changes_session ON file_changes(session_id);
 `
 
+// v6: 포트 스키마 확장 (세션 추적용)
+const schemaV6 = `
+-- ports 테이블에 추적 컬럼 추가는 migrate()에서 처리
+
+-- 포트 인덱스 추가
+CREATE INDEX IF NOT EXISTS idx_ports_session ON ports(session_id);
+`
+
+// v7: 다중 환경 동기화 지원
+const schemaV7 = `
+-- 환경 프로파일
+CREATE TABLE IF NOT EXISTS environments (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    hostname TEXT,
+    paths JSON,
+    is_current INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_active DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_environments_current ON environments(is_current);
+CREATE INDEX IF NOT EXISTS idx_environments_name ON environments(name);
+
+-- 동기화 메타정보
+CREATE TABLE IF NOT EXISTS sync_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 동기화 히스토리
+CREATE TABLE IF NOT EXISTS sync_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    direction TEXT NOT NULL,
+    env_id TEXT,
+    items_count INTEGER DEFAULT 0,
+    conflicts_count INTEGER DEFAULT 0,
+    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_history_env ON sync_history(env_id);
+CREATE INDEX IF NOT EXISTS idx_sync_history_time ON sync_history(synced_at);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -265,7 +315,17 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v5 스키마 적용 실패: %w", err)
 	}
 
-	// 7. 버전 저장
+	// 7. v6 적용 (포트 추적)
+	if _, err := d.Exec(schemaV6); err != nil {
+		return fmt.Errorf("v6 스키마 적용 실패: %w", err)
+	}
+
+	// 8. v7 적용 (다중 환경 동기화)
+	if _, err := d.Exec(schemaV7); err != nil {
+		return fmt.Errorf("v7 스키마 적용 실패: %w", err)
+	}
+
+	// 9. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)
@@ -296,6 +356,24 @@ func (d *DB) migrate() error {
 
 	// v3 -> v4: projects 테이블은 schemaV4에서 생성
 	// 추가 마이그레이션 필요 시 여기에 추가
+
+	// v5 -> v6: ports 테이블에 추적 컬럼 추가
+	if currentVersion < 6 {
+		d.Exec(`ALTER TABLE ports ADD COLUMN input_tokens INTEGER DEFAULT 0`)
+		d.Exec(`ALTER TABLE ports ADD COLUMN output_tokens INTEGER DEFAULT 0`)
+		d.Exec(`ALTER TABLE ports ADD COLUMN cost_usd REAL DEFAULT 0`)
+		d.Exec(`ALTER TABLE ports ADD COLUMN duration_secs INTEGER DEFAULT 0`)
+		d.Exec(`ALTER TABLE ports ADD COLUMN agent_id TEXT`)
+	}
+
+	// v6 -> v7: 다중 환경 동기화 지원
+	if currentVersion < 7 {
+		// sessions에 환경 추적 컬럼 추가
+		d.Exec(`ALTER TABLE sessions ADD COLUMN created_env TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN last_env TEXT`)
+		// projects에 논리 경로 컬럼 추가
+		d.Exec(`ALTER TABLE projects ADD COLUMN logical_root TEXT`)
+	}
 
 	return nil
 }

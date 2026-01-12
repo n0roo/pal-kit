@@ -1,0 +1,27 @@
+version: "1"
+updated_at: 2026-01-12T02:04:12.659637+09:00
+files:
+    CLAUDE.md:
+        path: CLAUDE.md
+        type: context
+        hash: sha256:29df421c9ebc131b0f078eeccb0a1570c02d6910186935c7a142d347a48d4c4f
+        size: 2323
+        mtime: 2026-01-12T02:04:12.656748007+09:00
+        managed_by: pal
+        status: synced
+    conventions/go-style.yaml:
+        path: conventions/go-style.yaml
+        type: convention
+        hash: sha256:b110fd5ef9ab5f72e90852d7c49b3c5606f8088bfc3f27935eff6cc54f87cf9e
+        size: 1881
+        mtime: 2026-01-12T02:01:13.84169622+09:00
+        managed_by: user
+        status: synced
+    conventions/pal-kit.yaml:
+        path: conventions/pal-kit.yaml
+        type: convention
+        hash: sha256:7c7a50ed9dc8b112deb98c86f29b33e3816d9ab6046ab36f315ba19bf0cfc5b0
+        size: 2462
+        mtime: 2026-01-12T02:01:13.841798262+09:00
+        managed_by: user
+        status: synced

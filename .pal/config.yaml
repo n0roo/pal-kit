@@ -1,0 +1,17 @@
+version: 0.4.0
+project:
+    name: ""
+workflow:
+    type: integrate
+agents:
+    core:
+        - builder
+        - planner
+        - architect
+        - manager
+        - tester
+        - logger
+settings:
+    auto_port_create: true
+    require_user_review: true
+    auto_test_on_complete: true
