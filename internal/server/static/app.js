@@ -930,21 +930,30 @@ async function loadHistory() {
 async function loadPorts() {
     const data = await fetchAPI('ports');
     const tbody = document.getElementById('ports-table');
-    
+
     if (!data || data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No ports</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No ports</td></tr>';
         return;
     }
-    
-    tbody.innerHTML = data.map(p => `
+
+    tbody.innerHTML = data.map(p => {
+        const totalTokens = (p.input_tokens || 0) + (p.output_tokens || 0);
+        const tokensStr = totalTokens > 0 ? formatNumber(totalTokens) : '-';
+        const costStr = p.cost_usd > 0 ? `$${p.cost_usd.toFixed(2)}` : '-';
+        const durationStr = p.duration_str || (p.duration_secs > 0 ? formatDuration(p.duration_secs) : '-');
+
+        return `
         <tr>
             <td>${statusBadge(p.status || 'unknown')}</td>
             <td class="text-sm">${escapeHtml(p.id || '-')}</td>
             <td>${escapeHtml(p.title || '-')}</td>
             <td>${escapeHtml(p.session_id || '-')}</td>
+            <td class="text-sm">${durationStr}</td>
+            <td class="text-sm">${tokensStr}</td>
+            <td class="text-sm">${costStr}</td>
             <td class="text-sm muted">${formatDate(p.created_at)}</td>
         </tr>
-    `).join('');
+    `}).join('');
 }
 
 // Workflows (formerly Pipelines)

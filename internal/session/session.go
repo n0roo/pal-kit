@@ -185,6 +185,39 @@ func (s *Service) EndWithReason(id, reason string) error {
 	return nil
 }
 
+// EndAllByClaudeSession closes all running sessions for a Claude session ID
+func (s *Service) EndAllByClaudeSession(claudeSessionID, reason string) (int, error) {
+	result, err := s.db.Exec(`
+		UPDATE sessions
+		SET status = 'complete', ended_at = CURRENT_TIMESTAMP
+		WHERE claude_session_id = ? AND status = 'running'
+	`, claudeSessionID)
+
+	if err != nil {
+		return 0, fmt.Errorf("세션 종료 실패: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	return int(rows), nil
+}
+
+// CleanupZombieSessions closes sessions that have been running for too long
+func (s *Service) CleanupZombieSessions(maxAgeHours int) (int, error) {
+	result, err := s.db.Exec(`
+		UPDATE sessions
+		SET status = 'complete', ended_at = CURRENT_TIMESTAMP
+		WHERE status = 'running'
+		AND started_at < datetime('now', ? || ' hours')
+	`, -maxAgeHours)
+
+	if err != nil {
+		return 0, fmt.Errorf("좀비 세션 정리 실패: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	return int(rows), nil
+}
+
 // LogEvent logs a session event
 func (s *Service) LogEvent(sessionID, eventType, eventData string) error {
 	_, err := s.db.Exec(`
