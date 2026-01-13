@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/n0roo/pal-kit/internal/agent"
 	"github.com/n0roo/pal-kit/internal/db"
 	"github.com/n0roo/pal-kit/internal/prompt"
 	"github.com/n0roo/pal-kit/internal/worker"
@@ -23,6 +24,7 @@ type ClaudeService struct {
 	projectRoot   string
 	workerMapper  *worker.Mapper
 	promptBuilder *prompt.Builder
+	agentSvc      *agent.Service
 }
 
 // NewClaudeService creates a new Claude integration service
@@ -32,7 +34,88 @@ func NewClaudeService(database *db.DB, projectRoot string) *ClaudeService {
 		projectRoot:   projectRoot,
 		workerMapper:  worker.NewMapper(projectRoot),
 		promptBuilder: prompt.NewBuilder(projectRoot),
+		agentSvc:      agent.NewService(projectRoot),
 	}
+}
+
+// SessionStartResult contains the result of session-start operation
+type SessionStartResult struct {
+	BuilderActive  bool
+	BuilderID      string
+	BuilderName    string
+	BuilderPrompt  string
+	RulesFile      string
+	TokenCount     int
+}
+
+// ProcessSessionStart handles the session-start hook for builder activation
+func (s *ClaudeService) ProcessSessionStart() (*SessionStartResult, error) {
+	result := &SessionStartResult{}
+
+	// 1. Load builder agent
+	builderAgent, err := s.agentSvc.Get("builder")
+	if err != nil {
+		// Builder agent not found - return empty result (not an error)
+		return result, nil
+	}
+
+	result.BuilderActive = true
+	result.BuilderID = builderAgent.ID
+	result.BuilderName = builderAgent.Name
+
+	// 2. Get builder prompt
+	builderPrompt, err := s.agentSvc.GetPrompt("builder")
+	if err != nil {
+		return result, nil
+	}
+	result.BuilderPrompt = builderPrompt
+	result.TokenCount = len(builderPrompt) / 4 // rough estimate
+
+	// 3. Create builder rules file
+	rulesDir := filepath.Join(s.projectRoot, ".claude", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		return result, nil
+	}
+
+	rulesFile := filepath.Join(rulesDir, "builder.md")
+	rulesContent := s.generateBuilderRulesContent(builderAgent, builderPrompt)
+
+	if err := os.WriteFile(rulesFile, []byte(rulesContent), 0644); err != nil {
+		return result, nil
+	}
+
+	result.RulesFile = rulesFile
+
+	return result, nil
+}
+
+// ProcessSessionEnd handles session-end cleanup for builder
+func (s *ClaudeService) ProcessSessionEnd() error {
+	// Remove builder rules file
+	rulesFile := filepath.Join(s.projectRoot, ".claude", "rules", "builder.md")
+	if err := os.Remove(rulesFile); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// generateBuilderRulesContent generates the builder rules file content
+func (s *ClaudeService) generateBuilderRulesContent(builderAgent *agent.Agent, prompt string) string {
+	var sb strings.Builder
+
+	// YAML frontmatter - applies to all files
+	sb.WriteString("---\n")
+	sb.WriteString("alwaysApply: true\n")
+	sb.WriteString("---\n\n")
+
+	// Header
+	sb.WriteString(fmt.Sprintf("# %s Agent\n\n", builderAgent.Name))
+	sb.WriteString(fmt.Sprintf("> 자동 생성됨: %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
+
+	// Prompt content
+	sb.WriteString(prompt)
+
+	return sb.String()
 }
 
 // PortStartResult contains the result of port-start operation

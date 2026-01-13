@@ -11,14 +11,14 @@ import (
 
 // Agent represents an agent configuration
 type Agent struct {
-	ID          string            `yaml:"id"`
-	Name        string            `yaml:"name"`
-	Description string            `yaml:"description"`
-	Type        string            `yaml:"type"` // builder, worker, reviewer, etc.
-	Prompt      string            `yaml:"prompt"`
-	Tools       []string          `yaml:"tools"`
-	Config      map[string]string `yaml:"config"`
-	FilePath    string            `yaml:"-"` // 파일 경로 (로드 시 설정)
+	ID          string            `yaml:"id" json:"id"`
+	Name        string            `yaml:"name" json:"name"`
+	Description string            `yaml:"description" json:"description"`
+	Type        string            `yaml:"type" json:"type"` // builder, worker, reviewer, etc.
+	Prompt      string            `yaml:"prompt" json:"prompt,omitempty"`
+	Tools       []string          `yaml:"tools" json:"tools,omitempty"`
+	Config      map[string]string `yaml:"config" json:"config,omitempty"`
+	FilePath    string            `yaml:"-" json:"file_path,omitempty"` // 파일 경로 (로드 시 설정)
 }
 
 // AgentSpec is the YAML structure for agent files

@@ -118,6 +118,17 @@
             <!-- Sessions Tab -->
             <section id="tab-sessions" class="tab-content">
                 <h2>Sessions</h2>
+
+                <!-- Session Tree View -->
+                <div class="viz-section">
+                    <h3 class="section-title">📂 Session Tree</h3>
+                    <div id="session-tree" class="tree-view">
+                        <div class="empty-state">Loading session tree...</div>
+                    </div>
+                </div>
+
+                <!-- Session Table -->
+                <h3 class="section-title">Session List</h3>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
@@ -210,6 +221,36 @@
             <!-- Ports Tab -->
             <section id="tab-ports" class="tab-content">
                 <h2>Ports</h2>
+
+                <!-- Port Progress Dashboard -->
+                <div class="viz-section">
+                    <h3 class="section-title">📊 Port Progress</h3>
+                    <div class="port-progress-grid">
+                        <div class="progress-column">
+                            <div class="progress-header complete">✅ Completed</div>
+                            <div id="ports-completed" class="progress-list"></div>
+                        </div>
+                        <div class="progress-column">
+                            <div class="progress-header active">🔄 In Progress</div>
+                            <div id="ports-in-progress" class="progress-list"></div>
+                        </div>
+                        <div class="progress-column">
+                            <div class="progress-header pending">⏳ Pending</div>
+                            <div id="ports-pending" class="progress-list"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Port Flow Diagram -->
+                <div class="viz-section">
+                    <h3 class="section-title">🔗 Port Dependencies</h3>
+                    <div id="port-flow" class="flow-diagram">
+                        <div class="empty-state">Loading port flow...</div>
+                    </div>
+                </div>
+
+                <!-- Port Table -->
+                <h3 class="section-title">Port List</h3>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>

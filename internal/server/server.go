@@ -79,6 +79,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/history/stats", s.withCORS(s.handleHistoryStats))
 	mux.HandleFunc("/api/history/export", s.withCORS(s.handleHistoryExport))
 
+	// Session visualization API
+	mux.HandleFunc("/api/sessions/tree", s.withCORS(s.handleSessionTree))
+	mux.HandleFunc("/api/ports/flow", s.withCORS(s.handlePortFlow))
+	mux.HandleFunc("/api/ports/progress", s.withCORS(s.handlePortProgress))
+
 	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -947,4 +952,187 @@ func (s *Server) handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename=history.json")
 		w.Write(data)
 	}
+}
+
+// handleSessionTree returns hierarchical session tree
+func (s *Server) handleSessionTree(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	svc := session.NewService(database)
+
+	// Get root sessions (sessions without parent)
+	rootSessions, err := svc.GetRootSessions(50)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	// Build trees for each root session
+	var trees []SessionTreeNodeDTO
+	for _, root := range rootSessions {
+		tree, err := svc.GetTree(root.ID)
+		if err != nil {
+			continue
+		}
+		trees = append(trees, toSessionTreeNodeDTO(*tree))
+	}
+
+	if trees == nil {
+		trees = []SessionTreeNodeDTO{}
+	}
+
+	s.jsonResponse(w, map[string]interface{}{
+		"sessions": trees,
+	})
+}
+
+// handlePortFlow returns port dependency flow diagram data
+func (s *Server) handlePortFlow(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	sessionID := r.URL.Query().Get("session")
+
+	portSvc := port.NewService(database)
+	docsSvc := docs.NewService(s.config.ProjectRoot)
+
+	// Get ports
+	var ports []port.Port
+	if sessionID != "" {
+		// Get ports for specific session
+		ports, err = portSvc.ListBySession(sessionID)
+	} else {
+		ports, err = portSvc.List("", 100)
+	}
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	// Convert to nodes
+	var portNodes []PortNodeDTO
+	for _, p := range ports {
+		node := PortNodeDTO{
+			ID:     p.ID,
+			Status: p.Status,
+		}
+		if p.Title.Valid {
+			node.Title = p.Title.String
+		}
+		if p.AgentID.Valid {
+			node.Agent = p.AgentID.String
+		}
+		portNodes = append(portNodes, node)
+	}
+
+	// Get dependencies from document content
+	var deps []PortDependencyDTO
+	for _, p := range ports {
+		// Try to read port document and parse dependencies
+		docPath := fmt.Sprintf("ports/%s.md", p.ID)
+		content, err := docsSvc.GetContent(docPath)
+		if err != nil {
+			continue
+		}
+
+		// Parse dependency from markdown metadata table
+		// Look for: | 의존성 | value | pattern
+		depStr := parseMarkdownDependency(content)
+		if depStr != "" {
+			depList := strings.Split(depStr, ",")
+			for _, dep := range depList {
+				dep = strings.TrimSpace(dep)
+				if dep != "" && dep != "-" && dep != "없음" {
+					deps = append(deps, PortDependencyDTO{
+						From: dep,
+						To:   p.ID,
+					})
+				}
+			}
+		}
+	}
+
+	if portNodes == nil {
+		portNodes = []PortNodeDTO{}
+	}
+	if deps == nil {
+		deps = []PortDependencyDTO{}
+	}
+
+	s.jsonResponse(w, PortFlowDTO{
+		Ports:        portNodes,
+		Dependencies: deps,
+	})
+}
+
+// parseMarkdownDependency extracts dependency value from markdown content
+func parseMarkdownDependency(content string) string {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		// Look for dependency row in markdown table: | 의존성 | value |
+		if strings.Contains(line, "의존성") && strings.Contains(line, "|") {
+			parts := strings.Split(line, "|")
+			if len(parts) >= 3 {
+				// parts[0] is empty, parts[1] is "의존성", parts[2] is value
+				return strings.TrimSpace(parts[2])
+			}
+		}
+	}
+	return ""
+}
+
+// handlePortProgress returns ports grouped by status
+func (s *Server) handlePortProgress(w http.ResponseWriter, r *http.Request) {
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	portSvc := port.NewService(database)
+	ports, err := portSvc.List("", 100)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	result := PortProgressDTO{
+		Completed:  []PortNodeDTO{},
+		InProgress: []PortNodeDTO{},
+		Pending:    []PortNodeDTO{},
+	}
+
+	for _, p := range ports {
+		node := PortNodeDTO{
+			ID:     p.ID,
+			Status: p.Status,
+		}
+		if p.Title.Valid {
+			node.Title = p.Title.String
+		}
+		if p.AgentID.Valid {
+			node.Agent = p.AgentID.String
+		}
+
+		switch p.Status {
+		case "complete", "done":
+			result.Completed = append(result.Completed, node)
+		case "running", "in_progress":
+			result.InProgress = append(result.InProgress, node)
+		default: // pending, draft, blocked, etc.
+			result.Pending = append(result.Pending, node)
+		}
+	}
+
+	s.jsonResponse(w, result)
 }

@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 7
+const schemaVersion = 9
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -248,6 +248,99 @@ CREATE INDEX IF NOT EXISTS idx_sync_history_env ON sync_history(env_id);
 CREATE INDEX IF NOT EXISTS idx_sync_history_time ON sync_history(synced_at);
 `
 
+// v8: 문서 관리 (docs-management)
+const schemaV8 = `
+-- 문서 인덱스
+CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    type TEXT,
+    domain TEXT,
+    status TEXT DEFAULT 'active',
+    priority TEXT,
+    tokens INTEGER DEFAULT 0,
+    summary TEXT,
+    content_hash TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
+CREATE INDEX IF NOT EXISTS idx_documents_domain ON documents(domain);
+CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
+CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path);
+
+-- 문서 태그
+CREATE TABLE IF NOT EXISTS document_tags (
+    document_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (document_id, tag),
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_tags_tag ON document_tags(tag);
+
+-- 문서 링크 (의존성)
+CREATE TABLE IF NOT EXISTS document_links (
+    from_id TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    link_type TEXT NOT NULL,
+    PRIMARY KEY (from_id, to_id),
+    FOREIGN KEY (from_id) REFERENCES documents(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_links_from ON document_links(from_id);
+CREATE INDEX IF NOT EXISTS idx_document_links_to ON document_links(to_id);
+CREATE INDEX IF NOT EXISTS idx_document_links_type ON document_links(link_type);
+`
+
+// v9: 코드 마커 인덱싱
+const schemaV9 = `
+-- 코드 마커
+CREATE TABLE IF NOT EXISTS code_markers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    port TEXT NOT NULL,
+    layer TEXT,
+    domain TEXT,
+    adapter TEXT,
+    generated INTEGER DEFAULT 0,
+    file_path TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    project_root TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(file_path, line)
+);
+
+CREATE INDEX IF NOT EXISTS idx_markers_port ON code_markers(port);
+CREATE INDEX IF NOT EXISTS idx_markers_layer ON code_markers(layer);
+CREATE INDEX IF NOT EXISTS idx_markers_domain ON code_markers(domain);
+CREATE INDEX IF NOT EXISTS idx_markers_generated ON code_markers(generated);
+CREATE INDEX IF NOT EXISTS idx_markers_file ON code_markers(file_path);
+
+-- 마커 의존성 (포트 간 의존 관계)
+CREATE TABLE IF NOT EXISTS code_marker_deps (
+    from_port TEXT NOT NULL,
+    to_port TEXT NOT NULL,
+    PRIMARY KEY (from_port, to_port)
+);
+
+CREATE INDEX IF NOT EXISTS idx_marker_deps_from ON code_marker_deps(from_port);
+CREATE INDEX IF NOT EXISTS idx_marker_deps_to ON code_marker_deps(to_port);
+
+-- 마커와 포트 명세 연결
+CREATE TABLE IF NOT EXISTS marker_port_links (
+    marker_port TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    PRIMARY KEY (marker_port, document_id),
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_marker_port_links_port ON marker_port_links(marker_port);
+CREATE INDEX IF NOT EXISTS idx_marker_port_links_doc ON marker_port_links(document_id);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -325,7 +418,17 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v7 스키마 적용 실패: %w", err)
 	}
 
-	// 9. 버전 저장
+	// 9. v8 적용 (문서 관리)
+	if _, err := d.Exec(schemaV8); err != nil {
+		return fmt.Errorf("v8 스키마 적용 실패: %w", err)
+	}
+
+	// 10. v9 적용 (코드 마커)
+	if _, err := d.Exec(schemaV9); err != nil {
+		return fmt.Errorf("v9 스키마 적용 실패: %w", err)
+	}
+
+	// 11. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)

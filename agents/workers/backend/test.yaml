@@ -19,6 +19,7 @@ agent:
     - 테스트 커버리지 관리
 
   conventions_ref: conventions/agents/workers/backend/test.md
+  rules_ref: agents/workers/backend/test.rules.md
 
   port_types:
     - tpl-test-port

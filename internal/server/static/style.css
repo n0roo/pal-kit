@@ -1159,3 +1159,254 @@ body {
         transform: translateX(-50%) translateY(0);
     }
 }
+
+/* ============================================
+   Session & Port Visualization Components
+   ============================================ */
+
+/* Visualization Section */
+.viz-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.viz-section .section-title {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+/* Session Tree View */
+.tree-view {
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.tree-node {
+    margin-left: 0;
+}
+
+.tree-node .tree-children {
+    margin-left: 1.5rem;
+    border-left: 1px dashed var(--border);
+    padding-left: 1rem;
+}
+
+.tree-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.tree-item:hover {
+    background: var(--bg-hover);
+}
+
+.tree-item .tree-icon {
+    font-size: 1rem;
+}
+
+.tree-item .tree-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tree-item .tree-status {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    background: var(--bg-hover);
+}
+
+.tree-item .tree-status.active {
+    background: var(--secondary);
+    color: white;
+}
+
+.tree-item .tree-status.complete {
+    background: var(--primary);
+    color: white;
+}
+
+/* Port Progress Grid */
+.port-progress-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    min-height: 200px;
+}
+
+@media (max-width: 768px) {
+    .port-progress-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.progress-column {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.progress-header {
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+
+.progress-header.complete {
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--primary);
+}
+
+.progress-header.active {
+    background: rgba(255, 152, 0, 0.15);
+    color: var(--secondary);
+}
+
+.progress-header.pending {
+    background: rgba(158, 158, 158, 0.15);
+    color: var(--text-muted);
+}
+
+.progress-list {
+    padding: 0.5rem;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.progress-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 0.25rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.progress-item:hover {
+    background: var(--bg-hover);
+    transform: translateX(2px);
+}
+
+.progress-item .port-id {
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.progress-item .port-title {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Port Flow Diagram */
+.flow-diagram {
+    min-height: 200px;
+    max-height: 400px;
+    overflow: auto;
+    padding: 1rem;
+}
+
+.flow-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.flow-node {
+    background: var(--bg-card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    min-width: 150px;
+    text-align: center;
+    position: relative;
+}
+
+.flow-node.complete {
+    border-color: var(--primary);
+}
+
+.flow-node.active {
+    border-color: var(--secondary);
+    animation: pulse 2s infinite;
+}
+
+.flow-node.pending {
+    border-color: var(--border);
+    opacity: 0.7;
+}
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 152, 0, 0); }
+}
+
+.flow-node .node-id {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.flow-node .node-status {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.flow-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+}
+
+/* Dependency list view (alternative) */
+.dep-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.dep-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-radius: 4px;
+}
+
+.dep-item .dep-from,
+.dep-item .dep-to {
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.dep-item .dep-arrow {
+    color: var(--text-muted);
+}

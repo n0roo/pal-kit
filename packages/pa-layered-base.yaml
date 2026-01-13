@@ -31,11 +31,14 @@ package:
     architect:
       conventions_ref: conventions/agents/core/architect.md
 
-    manager:
-      conventions_ref: conventions/agents/core/manager.md
+    operator:
+      conventions_ref: conventions/agents/core/operator.md
 
     tester:
       conventions_ref: conventions/agents/core/tester.md
 
-    logger:
-      conventions_ref: conventions/agents/core/logger.md
+    # manager와 logger는 operator로 통합됨
+    # manager:
+    #   conventions_ref: conventions/agents/core/manager.md
+    # logger:
+    #   conventions_ref: conventions/agents/core/logger.md

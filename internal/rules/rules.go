@@ -212,3 +212,23 @@ func (s *Service) generateRuleContentWithSpec(portID, title string, paths []stri
 
 	return sb.String()
 }
+
+// AppendToRule appends content to an existing rule file
+func (s *Service) AppendToRule(portID, content string) error {
+	rulePath := s.GetRulePath(portID)
+
+	// 기존 파일 읽기
+	existingContent, err := os.ReadFile(rulePath)
+	if err != nil {
+		return fmt.Errorf("규칙 파일 읽기 실패: %w", err)
+	}
+
+	// 새 내용 추가
+	newContent := string(existingContent) + "\n" + content
+
+	if err := os.WriteFile(rulePath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("규칙 파일 업데이트 실패: %w", err)
+	}
+
+	return nil
+}

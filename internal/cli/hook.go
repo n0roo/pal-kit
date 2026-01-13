@@ -6,14 +6,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
+	"github.com/n0roo/pal-kit/internal/document"
 	"github.com/n0roo/pal-kit/internal/lock"
 	"github.com/n0roo/pal-kit/internal/manifest"
+	"github.com/n0roo/pal-kit/internal/operator"
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/rules"
 	"github.com/n0roo/pal-kit/internal/session"
@@ -215,6 +218,16 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 	sessionSvc := session.NewService(database)
 	portSvc := port.NewService(database)
 
+	// 좀비 세션 정리 (24시간 이상 running 상태인 세션)
+	cleanedCount, err := sessionSvc.CleanupZombieSessions(24)
+	if err == nil && cleanedCount > 0 {
+		if verbose {
+			fmt.Printf("🧹 Cleaned %d zombie session(s)\n", cleanedCount)
+		}
+		// 좀비 정리 이벤트 로깅 (전역)
+		sessionSvc.LogEvent("system", "zombie_cleanup", fmt.Sprintf(`{"cleaned":%d}`, cleanedCount))
+	}
+
 	// 프로젝트 루트 찾기
 	cwd := input.Cwd
 	if cwd == "" {
@@ -228,7 +241,7 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 		projectName = filepath.Base(projectRoot)
 	}
 
-	// Claude 세션 ID로 기존 세션 확인
+	// Claude 세션 ID로 기존 세션 확인 (FindActiveSession 사용)
 	var palSessionID string
 	if input.SessionID != "" {
 		existingSession, err := sessionSvc.FindByClaudeSessionID(input.SessionID)
@@ -324,6 +337,19 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// 빌더 에이전트 자동 활성화
+	if projectRoot != "" {
+		claudeSvc := context.NewClaudeService(database, projectRoot)
+		builderResult, err := claudeSvc.ProcessSessionStart()
+		if err == nil && builderResult.BuilderActive {
+			if verbose {
+				fmt.Printf("🏗️  Builder agent activated: %s\n", builderResult.BuilderName)
+				fmt.Printf("   Rules: %s\n", builderResult.RulesFile)
+				fmt.Printf("   Tokens: ~%d\n", builderResult.TokenCount)
+			}
+		}
+	}
+
 	// 워크플로우 컨텍스트 주입 (rules 파일로)
 	if projectRoot != "" {
 		workflowSvc := workflow.NewService(projectRoot)
@@ -336,6 +362,49 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 			} else if verbose {
 				fmt.Printf("📝 Workflow context: %s (%s)\n", ctx.WorkflowType, workflowSvc.GetRulesPath())
 			}
+		}
+	}
+
+	// 세션명 제안 마커 출력 (Web UI에서 시작된 세션인 경우)
+	// Builder 에이전트가 이 마커를 인식하고 세션명을 제안함
+	if palSessionID != "" {
+		palSession, err := sessionSvc.Get(palSessionID)
+		if err == nil && palSession != nil {
+			// 타이틀이 비어있거나 "-"이면 세션명 제안 필요
+			needsName := !palSession.Title.Valid || palSession.Title.String == "" || palSession.Title.String == "-"
+			if needsName {
+				fmt.Println("<!-- pal:session:needs-name -->")
+			}
+		}
+	}
+
+	// Operator 브리핑 생성
+	if projectRoot != "" {
+		operatorSvc := operator.NewService(database, projectRoot)
+		briefing, err := operatorSvc.GenerateBriefing()
+		if err == nil {
+			// .pal/context/session-briefing.md 저장
+			if err := operatorSvc.WriteBriefing(briefing); err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "⚠️  브리핑 저장 실패: %v\n", err)
+				}
+			}
+
+			// stdout으로 요약 출력 (Claude가 읽음)
+			if briefing.Summary != "" && briefing.Summary != "No active work items." {
+				fmt.Printf("📋 %s\n", briefing.Summary)
+			}
+
+			// 권장 사항 출력
+			if len(briefing.Recommendations) > 0 && verbose {
+				fmt.Printf("💡 추천: %s\n", briefing.Recommendations[0])
+			}
+
+			if verbose {
+				fmt.Printf("📄 Briefing: %s\n", operatorSvc.GetBriefingPath())
+			}
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "⚠️  브리핑 생성 실패: %v\n", err)
 		}
 	}
 
@@ -376,64 +445,124 @@ func runHookSessionEnd(cmd *cobra.Command, args []string) error {
 		workflowSvc.CleanupRulesFile()
 	}
 
-	if claudeSessionID != "" {
-		// 종료 전에 PAL 세션 찾기 (usage 업데이트용)
-		palSession, _ := sessionSvc.FindByClaudeSessionID(claudeSessionID)
+	// 빌더 에이전트 정리
+	if projectRoot != "" {
+		claudeSvc := context.NewClaudeService(database, projectRoot)
+		claudeSvc.ProcessSessionEnd()
+	}
 
-		// transcript 파싱으로 usage 수집
-		transcriptPath := input.TranscriptPath
-		if transcriptPath != "" && palSession != nil {
-			usage, err := transcript.ParseFile(transcriptPath)
+	// FindActiveSession으로 다중 fallback 전략 사용
+	palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+	if err != nil {
+		if verbose {
+			fmt.Printf("⚠️  활성 세션을 찾을 수 없습니다: %v\n", err)
+		}
+		return nil // 세션이 없으면 조용히 종료
+	}
+
+	// transcript 파싱으로 usage 수집
+	transcriptPath := input.TranscriptPath
+	// fallback: 세션에 저장된 transcript 경로 사용
+	if transcriptPath == "" && palSession.TranscriptPath.Valid {
+		transcriptPath = palSession.TranscriptPath.String
+	}
+
+	if transcriptPath != "" {
+		// 파일이 아직 쓰는 중일 수 있음 → 재시도 로직
+		var usage *transcript.Usage
+		for retry := 0; retry < 3; retry++ {
+			usage, err = transcript.ParseFile(transcriptPath)
 			if err == nil && usage != nil {
-				// 세션 usage 업데이트
-				sessionSvc.UpdateUsage(
-					palSession.ID,
-					usage.InputTokens,
-					usage.OutputTokens,
-					usage.CacheReadTokens,
-					usage.CacheCreateTokens,
-					usage.CostUSD,
-				)
-
-				if verbose {
-					fmt.Printf("📊 Usage collected:\n")
-					fmt.Printf("   Input tokens: %d\n", usage.InputTokens)
-					fmt.Printf("   Output tokens: %d\n", usage.OutputTokens)
-					fmt.Printf("   Cache read: %d\n", usage.CacheReadTokens)
-					fmt.Printf("   Cache create: %d\n", usage.CacheCreateTokens)
-					fmt.Printf("   Cost: $%.4f\n", usage.CostUSD)
-				}
-			} else if verbose && err != nil {
-				fmt.Printf("⚠️  Usage 수집 실패: %v\n", err)
+				break
 			}
+			time.Sleep(100 * time.Millisecond)
 		}
 
-		// 종료 사유
-		reason := input.Reason
-		if reason == "" {
-			reason = "exit"
-		}
-
-		// Claude 세션 ID에 해당하는 모든 세션 종료
-		closedCount, err := sessionSvc.EndAllByClaudeSession(claudeSessionID, reason)
-		if err == nil && closedCount > 0 {
-			// 해당 세션들의 Lock 해제
-			locks, _ := lockSvc.List()
-			releasedCount := 0
-			for _, l := range locks {
-				// Claude 세션에 속한 Lock들 해제
-				lockSvc.Release(l.Resource)
-				releasedCount++
-			}
+		if usage != nil {
+			// 세션 usage 업데이트
+			sessionSvc.UpdateUsage(
+				palSession.ID,
+				usage.InputTokens,
+				usage.OutputTokens,
+				usage.CacheReadTokens,
+				usage.CacheCreateTokens,
+				usage.CostUSD,
+			)
 
 			if verbose {
-				fmt.Printf("✓ Sessions ended: %d (reason: %s)\n", closedCount, reason)
-				if releasedCount > 0 {
-					fmt.Printf("  Released %d locks\n", releasedCount)
+				fmt.Printf("📊 Usage collected:\n")
+				fmt.Printf("   Input tokens: %d\n", usage.InputTokens)
+				fmt.Printf("   Output tokens: %d\n", usage.OutputTokens)
+				fmt.Printf("   Cache read: %d\n", usage.CacheReadTokens)
+				fmt.Printf("   Cache create: %d\n", usage.CacheCreateTokens)
+				fmt.Printf("   Cost: $%.4f\n", usage.CostUSD)
+			}
+		} else if verbose && err != nil {
+			fmt.Printf("⚠️  Usage 수집 실패: %v\n", err)
+		}
+	}
+
+	// Operator 세션 요약 생성 (세션 종료 전에)
+	if projectRoot != "" {
+		operatorSvc := operator.NewService(database, projectRoot)
+		summary, err := operatorSvc.GenerateSummary(palSession.ID)
+		if err == nil {
+			// .pal/sessions/{date}-{id}.md 저장
+			if err := operatorSvc.WriteSummary(summary); err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "⚠️  세션 요약 저장 실패: %v\n", err)
 				}
+			} else if verbose {
+				fmt.Printf("📝 Session summary saved: %s-%s.md\n",
+					summary.GeneratedAt.Format("2006-01-02"), palSession.ID)
+			}
+
+			// 완료된 포트 출력
+			if len(summary.PortsCompleted) > 0 {
+				fmt.Printf("✅ Completed ports: %d\n", len(summary.PortsCompleted))
+			}
+
+			// ADR 후보 알림
+			if len(summary.ADRCandidates) > 0 && verbose {
+				fmt.Printf("📋 ADR candidates detected: %d\n", len(summary.ADRCandidates))
 			}
 		} else if verbose {
-			fmt.Printf("⚠️  No PAL session found for Claude session: %s\n", claudeSessionID)
+			fmt.Fprintf(os.Stderr, "⚠️  세션 요약 생성 실패: %v\n", err)
+		}
+	}
+
+	// 종료 사유
+	reason := input.Reason
+	if reason == "" {
+		reason = "exit"
+	}
+
+	// 개별 세션 종료 이벤트 로깅
+	sessionSvc.LogEvent(palSession.ID, "session_end", fmt.Sprintf(`{"reason":"%s","claude_session_id":"%s"}`, reason, claudeSessionID))
+
+	// 세션 상태를 complete로 확실히 변경
+	if err := sessionSvc.EndWithReason(palSession.ID, reason); err != nil {
+		if verbose {
+			fmt.Printf("⚠️  세션 종료 실패: %v\n", err)
+		}
+		// fallback: Claude 세션 ID로 종료 시도
+		if claudeSessionID != "" {
+			sessionSvc.EndAllByClaudeSession(claudeSessionID, reason)
+		}
+	}
+
+	// Lock 해제
+	locks, _ := lockSvc.List()
+	releasedCount := 0
+	for _, l := range locks {
+		lockSvc.Release(l.Resource)
+		releasedCount++
+	}
+
+	if verbose {
+		fmt.Printf("✓ Session ended: %s (reason: %s)\n", palSession.ID, reason)
+		if releasedCount > 0 {
+			fmt.Printf("  Released %d locks\n", releasedCount)
 		}
 	}
 
@@ -578,34 +707,58 @@ func runHookPortStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// 포트 상태 변경
-	if err := portSvc.UpdateStatus(portID, "running"); err != nil {
-		return err
-	}
-
-	// 현재 세션에 포트 연결
-	claudeSessionID := input.SessionID
-	if claudeSessionID == "" {
-		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
-	}
-	if claudeSessionID != "" {
-		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
-		if err == nil && palSession != nil {
-			// 포트에 세션 ID 할당
-			portSvc.AssignSession(portID, palSession.ID)
-
-			// 포트 시작 이벤트 로깅
-			sessionSvc.LogEvent(palSession.ID, "port_start", fmt.Sprintf(`{"port_id":"%s","title":"%s"}`, portID, title))
-
+	// 문서 컨텍스트 로딩 (P3: docs-management)
+	docSvc := document.NewService(database, projectRoot)
+	if specPath != "" {
+		// 포트 명세에서 관련 문서 검색
+		relatedDocs, err := docSvc.GetRelatedDocs(specPath, 50000) // 50K 토큰 예산
+		if err == nil && len(relatedDocs) > 0 {
+			// .claude/rules/<port-id>.md 파일에 문서 참조 추가
+			docContext := generateDocContext(relatedDocs, projectRoot)
+			if docContext != "" {
+				rulesSvc.AppendToRule(portID, docContext)
+			}
 			if verbose {
-				fmt.Printf("🔗 Port linked to session: %s\n", palSession.ID)
+				fmt.Printf("📚 관련 문서 %d건 로드됨\n", len(relatedDocs))
 			}
 		}
 	}
 
-	// Claude 통합 서비스로 컨텍스트 처리
+	// 현재 세션 찾기 (FindActiveSession 사용)
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+
+	var palSessionID string
+	palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+	if err == nil && palSession != nil {
+		palSessionID = palSession.ID
+	}
+
+	// Claude 통합 서비스로 컨텍스트 처리 (먼저 워커 정보 얻기)
 	claudeSvc := context.NewClaudeService(database, projectRoot)
 	result, err := claudeSvc.ProcessPortStart(portID)
+
+	// 워커 ID 추출
+	var agentID string
+	if result != nil && result.WorkerID != "" {
+		agentID = result.WorkerID
+	}
+
+	// RecordStart로 포트 시작 기록 (상태, 시간, 세션, 에이전트 한 번에)
+	if err := portSvc.RecordStart(portID, palSessionID, agentID); err != nil {
+		// fallback: 기존 방식으로 상태만 변경
+		portSvc.UpdateStatus(portID, "running")
+	}
+
+	// 포트 시작 이벤트 로깅
+	if palSessionID != "" {
+		sessionSvc.LogEvent(palSessionID, "port_start", fmt.Sprintf(`{"port_id":"%s","title":"%s","agent_id":"%s"}`, portID, title, agentID))
+		if verbose {
+			fmt.Printf("🔗 Port linked to session: %s\n", palSessionID)
+		}
+	}
 	if err != nil {
 		// 실패해도 기본 동작은 수행
 		if verbose {
@@ -681,9 +834,16 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 		rulesSvc.DeactivatePort(portID)
 	}
 
-	// 포트 상태 변경
-	if err := portSvc.UpdateStatus(portID, "complete"); err != nil {
-		return err
+	// 세션 찾기 (FindActiveSession 사용)
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+
+	var palSessionID string
+	palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+	if err == nil && palSession != nil {
+		palSessionID = palSession.ID
 	}
 
 	// 포트 duration 계산 (시작 시간부터 현재까지)
@@ -692,23 +852,37 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 		durationSecs = int64(time.Since(p.StartedAt.Time).Seconds())
 	}
 
-	// 세션에서 이 포트 관련 Lock 해제
-	claudeSessionID := input.SessionID
-	if claudeSessionID == "" {
-		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
-	}
-	if claudeSessionID != "" {
-		locks, _ := lockSvc.List()
-		for _, l := range locks {
-			// 포트 관련 Lock이면 해제 (간단히 전체 해제)
-			lockSvc.Release(l.Resource)
-		}
+	// transcript에서 포트 작업 중 사용량 추정 (시작~종료 사이)
+	// 현재는 세션 전체 usage에서 추정하기 어려우므로 0으로 설정
+	// 향후 transcript 타임스탬프 기반 분할 수집 가능
+	var inputTokens, outputTokens int64
+	var costUSD float64
 
-		// 포트 완료 이벤트 로깅
-		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
-		if err == nil && palSession != nil {
-			sessionSvc.LogEvent(palSession.ID, "port_end", fmt.Sprintf(`{"port_id":"%s","duration_secs":%d}`, portID, durationSecs))
-		}
+	// 세션에 usage가 있으면 이 포트에 할당 (단순화: 포트 작업 중 발생한 것으로 간주)
+	// 더 정확한 추적은 port-start/port-end 사이의 transcript 분석 필요
+	if palSession != nil {
+		// 이미 세션에 수집된 usage 중 이 포트에 배분 (현재는 기록만)
+		// 실제 구현에서는 transcript 시간 범위 기반 분석 필요
+	}
+
+	// RecordCompletion으로 포트 완료 기록 (상태, 시간, duration, usage)
+	if err := portSvc.RecordCompletion(portID, inputTokens, outputTokens, costUSD); err != nil {
+		// fallback: 기존 방식
+		portSvc.UpdateStatus(portID, "complete")
+		portSvc.SetDuration(portID, durationSecs)
+	}
+
+	// Lock 해제
+	locks, _ := lockSvc.List()
+	for _, l := range locks {
+		lockSvc.Release(l.Resource)
+	}
+
+	// 포트 완료 이벤트 로깅
+	if palSessionID != "" {
+		sessionSvc.LogEvent(palSessionID, "port_end", fmt.Sprintf(
+			`{"port_id":"%s","duration_secs":%d,"input_tokens":%d,"output_tokens":%d,"cost_usd":%.4f}`,
+			portID, durationSecs, inputTokens, outputTokens, costUSD))
 	}
 
 	// Claude 통합 서비스로 컨텍스트 정리
@@ -727,8 +901,9 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 
 	if jsonOut {
 		output := map[string]interface{}{
-			"status": "completed",
-			"port":   portID,
+			"status":        "completed",
+			"port":          portID,
+			"duration_secs": durationSecs,
 		}
 		if result != nil {
 			output["message"] = result.Message
@@ -736,9 +911,25 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 		json.NewEncoder(os.Stdout).Encode(output)
 	} else {
 		fmt.Printf("✅ 포트 완료: %s\n", portID)
+		if durationSecs > 0 {
+			fmt.Printf("   소요 시간: %s\n", formatPortDuration(durationSecs))
+		}
 	}
 
 	return nil
+}
+
+// formatPortDuration formats seconds into human readable string
+func formatPortDuration(secs int64) string {
+	if secs < 60 {
+		return fmt.Sprintf("%d초", secs)
+	}
+	if secs < 3600 {
+		return fmt.Sprintf("%d분 %d초", secs/60, secs%60)
+	}
+	hours := secs / 3600
+	mins := (secs % 3600) / 60
+	return fmt.Sprintf("%d시간 %d분", hours, mins)
 }
 
 func runHookSync(cmd *cobra.Command, args []string) error {
@@ -830,4 +1021,75 @@ func runHookSync(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// generateDocContext creates document context markdown from related documents
+func generateDocContext(docs []document.Document, projectRoot string) string {
+	if len(docs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n---\n\n")
+	sb.WriteString("## 관련 문서\n\n")
+	sb.WriteString("> 이 포트와 관련된 문서입니다. 작업 시 참고하세요.\n\n")
+
+	// 타입별로 그룹화
+	byType := make(map[string][]document.Document)
+	for _, d := range docs {
+		byType[d.Type] = append(byType[d.Type], d)
+	}
+
+	typeOrder := []string{"l1", "l2", "lm", "convention", "template"}
+	typeNames := map[string]string{
+		"l1":         "L1 Domain",
+		"l2":         "L2 Feature",
+		"lm":         "LM Coordinator",
+		"convention": "컨벤션",
+		"template":   "템플릿",
+	}
+
+	for _, t := range typeOrder {
+		typeDocs, ok := byType[t]
+		if !ok || len(typeDocs) == 0 {
+			continue
+		}
+
+		name := typeNames[t]
+		if name == "" {
+			name = t
+		}
+
+		sb.WriteString(fmt.Sprintf("### %s\n\n", name))
+		for _, d := range typeDocs {
+			sb.WriteString(fmt.Sprintf("- **%s** (`%s`)\n", d.ID, d.Path))
+			if d.Domain != "" {
+				sb.WriteString(fmt.Sprintf("  - 도메인: %s\n", d.Domain))
+			}
+			sb.WriteString(fmt.Sprintf("  - 토큰: ~%d\n", d.Tokens))
+		}
+		sb.WriteString("\n")
+	}
+
+	// 기타 타입
+	for t, typeDocs := range byType {
+		found := false
+		for _, order := range typeOrder {
+			if t == order {
+				found = true
+				break
+			}
+		}
+		if found || len(typeDocs) == 0 {
+			continue
+		}
+
+		sb.WriteString(fmt.Sprintf("### %s\n\n", t))
+		for _, d := range typeDocs {
+			sb.WriteString(fmt.Sprintf("- **%s** (`%s`)\n", d.ID, d.Path))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }

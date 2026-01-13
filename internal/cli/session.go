@@ -86,6 +86,25 @@ var sessionCleanupCmd = &cobra.Command{
 	RunE: runSessionCleanup,
 }
 
+var sessionRenameCmd = &cobra.Command{
+	Use:   "rename <id> <name>",
+	Short: "세션 이름 변경",
+	Long: `세션의 이름(타이틀)을 변경합니다.
+
+형식: {type}-{target}-{date}
+예시: impl-user-auth-0114, fix-login-bug-0114`,
+	Args: cobra.ExactArgs(2),
+	RunE: runSessionRename,
+}
+
+var sessionChildrenCmd = &cobra.Command{
+	Use:   "children <id>",
+	Short: "하위 세션 목록",
+	Long:  `지정된 세션의 하위(자식) 세션 목록을 조회합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSessionChildren,
+}
+
 var sessionCleanupHours int
 
 func init() {
@@ -97,6 +116,8 @@ func init() {
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionTreeCmd)
 	sessionCmd.AddCommand(sessionCleanupCmd)
+	sessionCmd.AddCommand(sessionRenameCmd)
+	sessionCmd.AddCommand(sessionChildrenCmd)
 
 	sessionStartCmd.Flags().StringVar(&sessionPortID, "port", "", "포트 ID")
 	sessionStartCmd.Flags().StringVar(&sessionTitle, "title", "", "세션 제목")
@@ -576,6 +597,122 @@ func runSessionCleanup(cmd *cobra.Command, args []string) error {
 		fmt.Printf("정리할 좀비 세션이 없습니다 (기준: %d시간 이상)\n", sessionCleanupHours)
 	} else {
 		fmt.Printf("✅ %d개의 좀비 세션이 정리되었습니다 (기준: %d시간 이상)\n", cleaned, sessionCleanupHours)
+	}
+
+	return nil
+}
+
+func runSessionRename(cmd *cobra.Command, args []string) error {
+	sessionID := args[0]
+	newName := args[1]
+
+	svc, cleanup, err := getSessionService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// 세션 존재 확인
+	sess, err := svc.Get(sessionID)
+	if err != nil {
+		return fmt.Errorf("세션을 찾을 수 없습니다: %s", sessionID)
+	}
+
+	// 세션명 업데이트
+	if err := svc.UpdateTitle(sessionID, newName); err != nil {
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"status":   "renamed",
+			"id":       sessionID,
+			"old_name": sess.Title.String,
+			"new_name": newName,
+		})
+	} else {
+		oldName := "-"
+		if sess.Title.Valid && sess.Title.String != "" {
+			oldName = sess.Title.String
+		}
+		fmt.Printf("✅ 세션명 변경: %s\n", sessionID)
+		fmt.Printf("   %s → %s\n", oldName, newName)
+	}
+
+	return nil
+}
+
+func runSessionChildren(cmd *cobra.Command, args []string) error {
+	sessionID := args[0]
+
+	svc, cleanup, err := getSessionService()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// 상위 세션 확인
+	_, err = svc.Get(sessionID)
+	if err != nil {
+		return fmt.Errorf("세션을 찾을 수 없습니다: %s", sessionID)
+	}
+
+	// 하위 세션 조회
+	children, err := svc.GetChildren(sessionID)
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"parent":   sessionID,
+			"children": children,
+			"count":    len(children),
+		})
+		return nil
+	}
+
+	if len(children) == 0 {
+		fmt.Printf("세션 %s의 하위 세션이 없습니다.\n", sessionID)
+		return nil
+	}
+
+	typeEmoji := map[string]string{
+		"single":  "📍",
+		"multi":   "🔀",
+		"sub":     "📎",
+		"builder": "🏗️",
+	}
+	statusEmoji := map[string]string{
+		"running":   "🔄",
+		"complete":  "✅",
+		"failed":    "❌",
+		"cancelled": "⚪",
+	}
+
+	fmt.Printf("👥 세션 %s의 하위 세션 (%d개)\n", sessionID, len(children))
+	fmt.Println(strings.Repeat("-", 60))
+	fmt.Printf("%-10s %-8s %-10s %-18s %-10s\n", "ID", "TYPE", "STATUS", "TITLE", "STARTED")
+	fmt.Println(strings.Repeat("-", 60))
+
+	for _, child := range children {
+		emoji := typeEmoji[child.SessionType]
+		if emoji == "" {
+			emoji = "📍"
+		}
+		status := statusEmoji[child.Status]
+		if status == "" {
+			status = "⏳"
+		}
+		title := "-"
+		if child.Title.Valid {
+			title = child.Title.String
+			if len(title) > 18 {
+				title = title[:15] + "..."
+			}
+		}
+		fmt.Printf("%-10s %s %-6s %s %-8s %-18s %s\n",
+			child.ID, emoji, child.SessionType, status, child.Status, title, child.StartedAt.Format("01-02 15:04"))
 	}
 
 	return nil

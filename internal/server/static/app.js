@@ -764,8 +764,11 @@ async function loadAllData() {
         loadSessionStats(),
         loadProjects(),
         loadSessions(),
+        loadSessionTree(),
         loadHistory(),
         loadPorts(),
+        loadPortProgress(),
+        loadPortFlow(),
         loadWorkflows(),
         loadDocs(),
         loadConventions(),
@@ -883,12 +886,12 @@ function filterProjects(query) {
 async function loadSessions() {
     const data = await fetchAPI('sessions');
     const tbody = document.getElementById('sessions-table');
-    
+
     if (!data || data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No sessions</td></tr>';
         return;
     }
-    
+
     tbody.innerHTML = data.map(s => `
         <tr onclick="showSessionDetail('${s.id}')" style="cursor:pointer">
             <td>${statusBadge(s.status || 'unknown')}</td>
@@ -901,6 +904,137 @@ async function loadSessions() {
             <td>${s.children_count || 0}</td>
         </tr>
     `).join('');
+}
+
+// Session Tree View
+async function loadSessionTree() {
+    const container = document.getElementById('session-tree');
+    if (!container) return;
+
+    const data = await fetchAPI('sessions/tree');
+
+    if (!data || !data.sessions || data.sessions.length === 0) {
+        container.innerHTML = '<div class="empty-state">No session hierarchies</div>';
+        return;
+    }
+
+    container.innerHTML = data.sessions.map(session => renderTreeNode(session)).join('');
+}
+
+function renderTreeNode(node) {
+    const icon = getAgentIcon(node.agent || node.session_type);
+    const statusClass = getStatusClass(node.status);
+    const hasChildren = node.children && node.children.length > 0;
+
+    let html = `
+        <div class="tree-node">
+            <div class="tree-item" onclick="showSessionDetail('${node.id}')">
+                <span class="tree-icon">${icon}</span>
+                <span class="tree-name">${escapeHtml(node.name || node.id)}</span>
+                <span class="tree-status ${statusClass}">${escapeHtml(node.status)}</span>
+            </div>
+    `;
+
+    if (hasChildren) {
+        html += '<div class="tree-children">';
+        html += node.children.map(child => renderTreeNode(child)).join('');
+        html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function getAgentIcon(agent) {
+    const icons = {
+        'builder': '📂',
+        'planner': '📋',
+        'architect': '🏗️',
+        'worker': '⚙️',
+        'tester': '🧪',
+        'support': '📚',
+        'single': '📍',
+        'main': '📂'
+    };
+    return icons[agent] || '📍';
+}
+
+function getStatusClass(status) {
+    if (status === 'active' || status === 'running') return 'active';
+    if (status === 'complete' || status === 'done') return 'complete';
+    return '';
+}
+
+// Port Progress Dashboard
+async function loadPortProgress() {
+    const data = await fetchAPI('ports/progress');
+
+    const completedEl = document.getElementById('ports-completed');
+    const inProgressEl = document.getElementById('ports-in-progress');
+    const pendingEl = document.getElementById('ports-pending');
+
+    if (!completedEl || !inProgressEl || !pendingEl) return;
+
+    if (!data) {
+        completedEl.innerHTML = '<div class="empty-state">-</div>';
+        inProgressEl.innerHTML = '<div class="empty-state">-</div>';
+        pendingEl.innerHTML = '<div class="empty-state">-</div>';
+        return;
+    }
+
+    completedEl.innerHTML = renderProgressItems(data.completed || []);
+    inProgressEl.innerHTML = renderProgressItems(data.in_progress || []);
+    pendingEl.innerHTML = renderProgressItems(data.pending || []);
+}
+
+function renderProgressItems(items) {
+    if (!items || items.length === 0) {
+        return '<div class="empty-state text-sm">None</div>';
+    }
+
+    return items.map(item => `
+        <div class="progress-item" onclick="showPortDetail('${item.id}')">
+            <span class="port-id">${escapeHtml(item.id)}</span>
+            ${item.title ? `<span class="port-title">${escapeHtml(item.title)}</span>` : ''}
+        </div>
+    `).join('');
+}
+
+// Port Flow Diagram
+async function loadPortFlow() {
+    const container = document.getElementById('port-flow');
+    if (!container) return;
+
+    const data = await fetchAPI('ports/flow');
+
+    if (!data || !data.ports || data.ports.length === 0) {
+        container.innerHTML = '<div class="empty-state">No ports available</div>';
+        return;
+    }
+
+    // Render as dependency list
+    if (!data.dependencies || data.dependencies.length === 0) {
+        container.innerHTML = '<div class="empty-state">No dependencies defined</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="dep-list">
+            ${data.dependencies.map(dep => `
+                <div class="dep-item">
+                    <span class="dep-from">${escapeHtml(dep.from)}</span>
+                    <span class="dep-arrow">→</span>
+                    <span class="dep-to">${escapeHtml(dep.to)}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Show port detail (placeholder)
+function showPortDetail(portId) {
+    // Could open a modal or navigate to port details
+    console.log('Show port detail:', portId);
 }
 
 // History (Event Log)

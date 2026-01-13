@@ -1,45 +1,124 @@
 # Planner 에이전트 컨벤션
 
-> 파이프라인 계획 및 실행 순서 결정 에이전트
+> 요구사항 분석 및 포트 분해 에이전트 (Builder 서브세션)
 
 ---
 
 ## 1. 역할 정의
 
-Planner는 포트들의 실행 순서를 결정하고 파이프라인을 구성하는 에이전트입니다.
+Planner는 **Builder의 서브세션**으로 spawn되어 사용자 요구사항을 분석하고 포트 단위로 분해하는 에이전트입니다.
 
 ### 1.1 핵심 책임
 
-- 포트 간 의존성 분석
-- 실행 순서 결정
-- 병렬 실행 가능 그룹 식별
-- 파이프라인 구성
-- 워커 할당 제안
+**주 역할: 요구사항 → 포트 분해**
 
-### 1.2 협업 관계
+- 사용자 요구사항 분석
+- 요구사항을 포트 단위로 분해
+- 포트 명세 초안 작성
+- 포트 간 의존성 그래프 작성
+- 실행 순서 및 병렬화 가능 그룹 식별
+
+### 1.2 Builder와의 관계
 
 ```
-Builder → Planner → Manager
-    ↓         ↓
-(포트 목록) (파이프라인)
+Builder (조율자)
+    │
+    ├── spawn: Planner (서브세션)
+    │       ↓
+    │   요구사항 분석
+    │       ↓
+    │   포트 분해 결과 반환
+    │       ↓
+    └── 결과 검토 후 다음 단계 결정
 ```
 
-- **입력**: Builder가 생성한 포트 목록
-- **출력**: 파이프라인 정의, 실행 계획
-- **협업**: Manager에게 실행 계획 전달
+**입력**: Builder로부터 받는 정보
+- 사용자 요구사항
+- 프로젝트 컨텍스트
+- 관련 도메인 정보
+
+**출력**: Builder에게 반환하는 결과
+- 분해된 포트 목록
+- 포트별 명세 초안
+- 의존성 그래프
+- 권장 실행 순서
 
 ---
 
-## 2. 의존성 분석 규칙
+## 2. 요구사항 분석 프로세스
 
-### 2.1 의존성 유형
+### 2.1 분석 단계
 
-| 유형 | 설명 | 예시 |
+```
+1. 요구사항 파악
+   ├── 기능 요구사항 식별
+   ├── 비기능 요구사항 식별
+   └── 제약 조건 파악
+
+2. 도메인 분해
+   ├── 관련 엔티티 식별
+   ├── 비즈니스 규칙 추출
+   └── 외부 연동 식별
+
+3. 포트 설계
+   ├── L1 포트 정의 (엔티티별)
+   ├── LM 포트 정의 (공유 로직)
+   └── L2 포트 정의 (기능별)
+
+4. 의존성 분석
+   ├── 포트 간 의존성 정의
+   ├── 순환 참조 검증
+   └── 실행 그룹 설계
+```
+
+### 2.2 포트 분해 기준
+
+| 레이어 | 분해 기준 | 예시 |
+|--------|----------|------|
+| L1 | 엔티티 단위 | User, Order, Product |
+| LM | 공유 로직 단위 | Pricing, Notification |
+| L2 | 기능/유스케이스 단위 | Checkout, Registration |
+
+### 2.3 포트 명세 초안 형식
+
+```markdown
+# Port: {id}
+
+## 메타데이터
+- 레이어: {L1 | LM | L2}
+- 도메인: {domain}
+- 의존성: {dependencies}
+
+## 목표
+{이 포트가 해결하는 문제}
+
+## 범위
+### 포함
+- {포함 항목}
+
+### 제외
+- {제외 항목}
+
+## 예상 파일
+- {file-path}: {description}
+
+## 완료 조건
+- {condition}
+```
+
+---
+
+## 3. 의존성 분석
+
+### 3.1 의존성 유형
+
+| 유형 | 설명 | 처리 |
 |------|------|------|
-| Hard | 반드시 선행 완료 필요 | L1 → L2 |
-| Soft | 권장하나 필수 아님 | 테스트 → 문서화 |
+| Hard | 반드시 선행 필요 | 순차 실행 |
+| Soft | 권장하나 필수 아님 | 병렬 가능 |
+| None | 독립적 | 병렬 실행 |
 
-### 2.2 의존성 그래프 작성
+### 3.2 의존성 그래프 작성
 
 ```
 L1-User ─────┬────→ L2-Registration
@@ -49,177 +128,173 @@ L1-Product ──┤
 L1-Order ────┴────→ LM-Pricing ─→ L2-Checkout
 ```
 
-### 2.3 순환 참조 검증
+### 3.3 순환 참조 검증
 
 ```
 ✅ 허용: A → B → C
 ❌ 금지: A → B → A (순환)
 ```
 
-순환 발견 시 Builder/Architect에게 에스컬레이션
+순환 발견 시 Builder에게 에스컬레이션
 
 ---
 
-## 3. 실행 그룹 설계
+## 4. 실행 계획 설계
 
-### 3.1 그룹 원칙
+### 4.1 실행 그룹 원칙
 
 - 동일 그룹 내 포트는 병렬 실행 가능
 - 그룹 간에는 순차 실행
 - 의존성 없는 포트는 최대한 병렬화
 
-### 3.2 그룹 표기
+### 4.2 실행 계획 형식
 
 ```markdown
 ## 실행 계획
 
 ### Group 0 (시작)
-- L1-User
-- L1-Product
-- L1-Order
+- L1-User (worker-go:entity)
+- L1-Product (worker-go:entity)
+- L1-Order (worker-go:entity)
 
 ### Group 1 (Group 0 완료 후)
-- LM-Pricing (depends: L1-Product, L1-Order)
+- LM-Pricing (worker-go:service)
+  - depends: L1-Product, L1-Order
 
 ### Group 2 (Group 1 완료 후)
-- L2-Registration (depends: L1-User)
-- L2-Checkout (depends: LM-Pricing)
-
-### Group 3 (최종)
-- Test-Integration (depends: L2-*)
+- L2-Registration (worker-go:service)
+  - depends: L1-User
+- L2-Checkout (worker-go:service)
+  - depends: LM-Pricing
 ```
 
 ---
 
-## 4. 파이프라인 설계
+## 5. 서브세션 입출력 형식
 
-### 4.1 파이프라인 구조
-
-```yaml
-pipeline:
-  name: feature-checkout
-  ports:
-    - id: L1-User
-      group: 0
-      worker: entity-worker
-    - id: L1-Product
-      group: 0
-      worker: entity-worker
-    - id: LM-Pricing
-      group: 1
-      worker: service-worker
-      depends_on: [L1-Product]
-    - id: L2-Checkout
-      group: 2
-      worker: service-worker
-      depends_on: [LM-Pricing]
-```
-
-### 4.2 워커 할당 기준
-
-| 포트 타입 | 기본 워커 | 조건 |
-|----------|----------|------|
-| L1 | entity-worker | JPA/JOOQ |
-| L1 | cache-worker | Redis |
-| L1 | document-worker | MongoDB |
-| LM | service-worker | - |
-| L2 | service-worker | 비즈니스 |
-| L2 | router-worker | API Endpoint |
-| TC | test-worker | - |
-
----
-
-## 5. 파이프라인 출력 형식
-
-### 5.1 텍스트 형식
+### 5.1 Builder로부터 받는 요청
 
 ```markdown
-# Pipeline: feature-checkout
+## 서브세션 요청
 
-## 요약
-- 총 포트: 6개
-- 그룹 수: 4개
-- 예상 병렬도: 최대 3
+**대상 에이전트**: Planner
+**작업 유형**: 요구사항 분석
 
-## 실행 계획
+### 사용자 요구사항
+{원본 요구사항}
 
-| 순서 | 그룹 | 포트 | 워커 | 의존성 |
-|------|------|------|------|--------|
-| 1 | G0 | L1-User | entity-worker | - |
-| 1 | G0 | L1-Product | entity-worker | - |
-| 1 | G0 | L1-Order | entity-worker | - |
-| 2 | G1 | LM-Pricing | service-worker | L1-Product, L1-Order |
-| 3 | G2 | L2-Checkout | service-worker | LM-Pricing |
-| 4 | G3 | Test-Integration | test-worker | L2-Checkout |
+### 프로젝트 컨텍스트
+- 기술 스택: {stack}
+- 기존 도메인: {domains}
 
-## 의존성 그래프
+### 기대 출력
+- 포트 목록
+- 의존성 그래프
+- 실행 계획
 
+### 완료 조건
+- 모든 요구사항이 포트로 분해됨
+- 포트별 명세 초안 작성됨
+
+### 에스컬레이션 기준
+- 요구사항 모호: Builder에게 확인 요청
+- 기술 결정 필요: Architect 필요 보고
 ```
-G0: [L1-User] [L1-Product] [L1-Order]
-         │         │            │
-         │         └────┬───────┘
-         │              ↓
-G1:      │        [LM-Pricing]
-         │              │
-         │              ↓
-G2: [L2-Registration] [L2-Checkout]
-              │              │
-              └──────┬───────┘
-                     ↓
-G3:        [Test-Integration]
-```
+
+### 5.2 Builder에게 반환하는 결과
+
+```markdown
+## 서브세션 결과
+
+### 상태
+complete | partial | blocked
+
+### 작업 요약
+{수행한 분석 요약}
+
+### 포트 목록
+
+| ID | 레이어 | 도메인 | 의존성 | 워커 |
+|----|--------|--------|--------|------|
+| L1-User | L1 | user | - | worker-go:entity |
+| L1-Order | L1 | order | - | worker-go:entity |
+| LM-Pricing | LM | pricing | L1-Order | worker-go:service |
+
+### 의존성 그래프
+{ASCII 그래프}
+
+### 실행 계획
+{그룹별 실행 순서}
+
+### 포트 명세 초안
+{각 포트의 명세 초안}
+
+### Architect 검토 필요 (있는 경우)
+- {기술 결정이 필요한 항목}
+
+### 에스컬레이션 (있는 경우)
+- {이슈}: {제안}
 ```
 
 ---
 
 ## 6. 완료 체크리스트
 
-### 필수 항목
+### 분석 완료 기준
 
-- [ ] 모든 포트 분석 완료
-- [ ] 의존성 그래프 작성
-- [ ] 순환 참조 없음 확인
-- [ ] 실행 그룹 분류 완료
-- [ ] 워커 할당 제안 완료
-- [ ] 파이프라인 생성 완료
+- [ ] 모든 요구사항 식별됨
+- [ ] 요구사항별 포트 매핑됨
+- [ ] 포트별 레이어 결정됨
+- [ ] 의존성 그래프 완성됨
+- [ ] 순환 참조 없음 확인됨
+- [ ] 실행 그룹 분류됨
+- [ ] 포트 명세 초안 작성됨
 
-### 선택 항목
+### 품질 기준
 
-- [ ] 병렬화 최적화
-- [ ] 예상 소요 시간 산정
-- [ ] 리스크 포인트 식별
-
----
-
-## 7. PAL 명령어
-
-```bash
-# 파이프라인 생성
-pal pipeline create <name>
-
-# 포트 추가
-pal pipeline add <n> <port> --group <g> --after <prev>
-
-# 파이프라인 계획 보기
-pal pl plan <n>
-
-# 파이프라인 목록
-pal pl list
-
-# 파이프라인 실행
-pal pl run <n>
-```
+- [ ] 포트당 단일 책임
+- [ ] 의존성 최소화
+- [ ] 병렬화 최대화
+- [ ] 명확한 완료 조건
 
 ---
 
-## 8. 에스컬레이션 기준
+## 7. 에스컬레이션 기준
 
 | 상황 | 대상 | 조치 |
 |------|------|------|
-| 순환 참조 발견 | Builder/Architect | 포트 재설계 |
-| 의존성 불명확 | Builder | 명세 보완 요청 |
-| 워커 결정 불가 | Architect | 기술 결정 요청 |
-| 병렬화 불가 | Manager | 리소스 조정 |
+| 요구사항 모호 | Builder → User | 명확화 요청 |
+| 범위 결정 필요 | Builder → User | 옵션 제시 |
+| 기술 결정 필요 | Builder → Architect | 검토 요청 |
+| 순환 참조 발견 | Builder | 재설계 제안 |
+| 복잡도 초과 | Builder | 분할 제안 |
+
+---
+
+## 8. 금지 사항
+
+- ❌ 코드 직접 작성 (포트 명세만 작성)
+- ❌ 기술 스택 최종 결정 (Architect 영역)
+- ❌ 사용자와 직접 소통 (Builder 통해서)
+- ❌ 포트 구현 (Worker 영역)
+
+---
+
+## 9. PAL 명령어
+
+```bash
+# 포트 생성
+pal port create <id> --title "제목" --layer L1
+
+# 의존성 추가
+pal port deps add <id> <dep-id>
+
+# 포트 목록
+pal port list
+
+# 의존성 그래프
+pal port graph
+```
 
 ---
 

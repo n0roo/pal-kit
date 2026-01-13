@@ -332,6 +332,124 @@ func (s *Service) FindByClaudeSessionID(claudeSessionID string) (*Session, error
 	return &sess, nil
 }
 
+// FindActiveSession finds an active session with multiple fallback strategies
+// 1. Try by Claude session ID (if provided)
+// 2. Try by cwd + project_root (if provided)
+// 3. Fall back to most recent running session
+func (s *Service) FindActiveSession(claudeSessionID, cwd, projectRoot string) (*Session, error) {
+	// Strategy 1: Claude session ID
+	if claudeSessionID != "" {
+		sess, err := s.FindByClaudeSessionID(claudeSessionID)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	// Strategy 2: cwd + project_root 기반
+	if cwd != "" || projectRoot != "" {
+		sess, err := s.findByLocation(cwd, projectRoot)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	// Strategy 3: 가장 최근 running 세션
+	sess, err := s.findMostRecentRunning()
+	if err == nil && sess != nil {
+		return sess, nil
+	}
+
+	return nil, fmt.Errorf("활성 세션을 찾을 수 없습니다")
+}
+
+// findByLocation finds a running session by cwd or project_root
+func (s *Service) findByLocation(cwd, projectRoot string) (*Session, error) {
+	var sess Session
+	var sessionType, parentSession sql.NullString
+
+	// cwd 또는 project_root로 검색
+	query := `
+		SELECT id, port_id, title, status,
+		       COALESCE(session_type, 'single'), parent_session,
+		       started_at, ended_at, jsonl_path,
+		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		       cost_usd, compact_count, last_compact_at,
+		       claude_session_id, project_root, project_name, transcript_path, cwd
+		FROM sessions
+		WHERE status = 'running'
+		  AND (cwd = ? OR project_root = ?)
+		ORDER BY started_at DESC
+		LIMIT 1
+	`
+
+	err := s.db.QueryRow(query, cwd, projectRoot).Scan(
+		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+		&sessionType, &parentSession,
+		&sess.StartedAt, &sess.EndedAt,
+		&sess.JSONLPath, &sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+		&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount, &sess.LastCompactAt,
+		&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName, &sess.TranscriptPath, &sess.Cwd,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("해당 위치의 세션을 찾을 수 없습니다")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if sessionType.Valid {
+		sess.SessionType = sessionType.String
+	} else {
+		sess.SessionType = TypeSingle
+	}
+	sess.ParentSession = parentSession
+
+	return &sess, nil
+}
+
+// findMostRecentRunning finds the most recent running session
+func (s *Service) findMostRecentRunning() (*Session, error) {
+	var sess Session
+	var sessionType, parentSession sql.NullString
+
+	err := s.db.QueryRow(`
+		SELECT id, port_id, title, status,
+		       COALESCE(session_type, 'single'), parent_session,
+		       started_at, ended_at, jsonl_path,
+		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		       cost_usd, compact_count, last_compact_at,
+		       claude_session_id, project_root, project_name, transcript_path, cwd
+		FROM sessions
+		WHERE status = 'running'
+		ORDER BY started_at DESC
+		LIMIT 1
+	`).Scan(
+		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+		&sessionType, &parentSession,
+		&sess.StartedAt, &sess.EndedAt,
+		&sess.JSONLPath, &sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+		&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount, &sess.LastCompactAt,
+		&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName, &sess.TranscriptPath, &sess.Cwd,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("running 세션이 없습니다")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if sessionType.Valid {
+		sess.SessionType = sessionType.String
+	} else {
+		sess.SessionType = TypeSingle
+	}
+	sess.ParentSession = parentSession
+
+	return &sess, nil
+}
+
 // UpdateStatus updates session status
 func (s *Service) UpdateStatus(id, status string) error {
 	result, err := s.db.Exec(`
@@ -340,6 +458,24 @@ func (s *Service) UpdateStatus(id, status string) error {
 
 	if err != nil {
 		return fmt.Errorf("상태 업데이트 실패: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("세션 '%s'을(를) 찾을 수 없습니다", id)
+	}
+
+	return nil
+}
+
+// UpdateTitle updates the session title
+func (s *Service) UpdateTitle(id, title string) error {
+	result, err := s.db.Exec(`
+		UPDATE sessions SET title = ? WHERE id = ?
+	`, title, id)
+
+	if err != nil {
+		return fmt.Errorf("타이틀 업데이트 실패: %w", err)
 	}
 
 	rows, _ := result.RowsAffected()

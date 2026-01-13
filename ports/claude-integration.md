@@ -9,7 +9,7 @@
 | 항목 | 값 |
 |------|-----|
 | ID | claude-integration |
-| 상태 | draft |
+| 상태 | complete |
 | 우선순위 | high |
 | 의존성 | agent-package-system, worker-backend-package, worker-frontend-package |
 | 예상 복잡도 | high |

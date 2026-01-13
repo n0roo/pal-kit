@@ -320,3 +320,83 @@ func formatDuration(secs int64) string {
 	mins := (secs % 3600) / 60
 	return fmt.Sprintf("%dh %dm", hours, mins)
 }
+
+// SessionTreeNodeDTO for hierarchical session tree
+type SessionTreeNodeDTO struct {
+	ID          string               `json:"id"`
+	Name        string               `json:"name,omitempty"`
+	Agent       string               `json:"agent,omitempty"`
+	Status      string               `json:"status"`
+	SessionType string               `json:"session_type,omitempty"`
+	StartedAt   string               `json:"started_at,omitempty"`
+	EndedAt     string               `json:"ended_at,omitempty"`
+	Children    []SessionTreeNodeDTO `json:"children,omitempty"`
+}
+
+func toSessionTreeNodeDTO(node session.SessionNode) SessionTreeNodeDTO {
+	dto := SessionTreeNodeDTO{
+		ID:          node.Session.ID,
+		Status:      node.Session.Status,
+		SessionType: node.Session.SessionType,
+		Agent:       node.Session.SessionType, // Use session type as agent identifier
+	}
+	if node.Session.Title.Valid {
+		dto.Name = node.Session.Title.String
+	}
+	dto.StartedAt = node.Session.StartedAt.Format(time.RFC3339)
+	if node.Session.EndedAt.Valid {
+		dto.EndedAt = node.Session.EndedAt.Time.Format(time.RFC3339)
+	}
+	if len(node.Children) > 0 {
+		dto.Children = make([]SessionTreeNodeDTO, len(node.Children))
+		for i, child := range node.Children {
+			dto.Children[i] = toSessionTreeNodeDTO(child)
+		}
+	}
+	return dto
+}
+
+// PortFlowDTO for port dependency visualization
+type PortFlowDTO struct {
+	Ports        []PortNodeDTO        `json:"ports"`
+	Dependencies []PortDependencyDTO  `json:"dependencies"`
+}
+
+// PortNodeDTO represents a port in the flow diagram
+type PortNodeDTO struct {
+	ID       string `json:"id"`
+	Title    string `json:"title,omitempty"`
+	Status   string `json:"status"`
+	Agent    string `json:"agent,omitempty"`
+	Progress int    `json:"progress,omitempty"`
+}
+
+// PortDependencyDTO represents a dependency between ports
+type PortDependencyDTO struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// PortProgressDTO for port progress dashboard
+type PortProgressDTO struct {
+	Completed  []PortNodeDTO `json:"completed"`
+	InProgress []PortNodeDTO `json:"in_progress"`
+	Pending    []PortNodeDTO `json:"pending"`
+}
+
+// WorkflowTimelineDTO for session workflow visualization
+type WorkflowTimelineDTO struct {
+	SessionID string              `json:"session_id"`
+	Phases    []WorkflowPhaseDTO  `json:"phases"`
+}
+
+// WorkflowPhaseDTO represents a phase in the workflow
+type WorkflowPhaseDTO struct {
+	Name      string              `json:"name"`
+	Status    string              `json:"status"` // complete, active, pending
+	Agent     string              `json:"agent,omitempty"`
+	SubPhases []WorkflowPhaseDTO  `json:"sub_phases,omitempty"`
+	StartedAt string              `json:"started_at,omitempty"`
+	EndedAt   string              `json:"ended_at,omitempty"`
+	Detail    string              `json:"detail,omitempty"`
+}

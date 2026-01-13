@@ -20,6 +20,7 @@ agent:
     - API 문서화 (RestDoc/Swagger)
 
   conventions_ref: conventions/agents/workers/backend/router.md
+  rules_ref: agents/workers/backend/router.rules.md
 
   port_types:
     - tpl-server-l3-port

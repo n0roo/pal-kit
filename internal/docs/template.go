@@ -28,6 +28,12 @@ type TemplateData struct {
 	AgentID     string
 	AgentName   string
 	AgentType   string
+	// Support Agent 템플릿용
+	DomainName  string
+	Name        string
+	ADRID       string
+	ADRSlug     string
+	ADRTitle    string
 	Custom      map[string]string
 }
 
@@ -68,6 +74,28 @@ func DefaultTemplates() []Template {
 			Type:        DocTypeConvention,
 			FileName:    "conventions/{{.Name}}.md",
 			Content:     conventionTemplate,
+		},
+		// Support Agent용 템플릿
+		{
+			Name:        "domain-spec",
+			Description: "도메인 명세 템플릿",
+			Type:        DocTypeTemplate,
+			FileName:    "domains/{{.DomainName}}/overview.md",
+			Content:     domainSpecTemplate,
+		},
+		{
+			Name:        "business-rule",
+			Description: "비즈니스 규칙 템플릿",
+			Type:        DocTypeTemplate,
+			FileName:    "domains/{{.DomainName}}/rules.md",
+			Content:     businessRuleTemplate,
+		},
+		{
+			Name:        "adr",
+			Description: "아키텍처 결정 기록 템플릿",
+			Type:        DocTypeTemplate,
+			FileName:    ".pal/decisions/{{.ADRID}}-{{.ADRSlug}}.md",
+			Content:     adrTemplate,
 		},
 	}
 }
@@ -278,19 +306,76 @@ pal config show
 
 ---
 
-## PAL Kit 기본 명령어
+## PAL Kit 연계 가이드
+
+### 세션 시작 시 필수 체크
+
+` + "```bash" + `
+# 프로젝트 상태 확인
+pal status
+
+# 포트 목록 확인 (진행 중인 작업)
+pal port list
+
+# 최근 세션 기록 확인
+pal session list
+` + "```" + `
+
+### 서브에이전트(Task tool) 활용 패턴
+
+` + "```" + `
+# Worker 에이전트 호출
+Task tool로 "worker-{tech}" 서브에이전트 실행
+예: worker-go, worker-react, worker-python
+
+# 작업 완료 후 결과 수집
+서브에이전트 결과를 바탕으로 상태 업데이트
+` + "```" + `
+
+### 포트 기반 작업 흐름
+
+1. 포트 시작: ` + "`pal hook port-start <id>`" + `
+2. .claude/rules/ 에 동적 규칙 생성됨
+3. 작업 수행 (규칙 참조)
+4. 포트 종료: ` + "`pal hook port-end <id>`" + `
+
+### Core vs Worker 에이전트
+
+| 타입 | 역할 | 예시 |
+|------|------|------|
+| Core | 오케스트레이션 | builder, planner, architect, operator |
+| Worker | 실행 | worker-go, worker-react |
+
+### 작업 완료 시 기록
+
+**ADR 생성 기준:**
+- 아키텍처 변경
+- 기술 스택 선택
+- 설계 패턴 결정
+- 중요한 트레이드오프
+
+---
+
+## PAL Kit 명령어
 
 ` + "```bash" + `
 # 상태 확인
 pal status
+pal status --dashboard
 
 # 포트 관리
 pal port list
 pal port create <id> --title "작업명"
+pal port status <id>
 
 # 작업 시작/종료
 pal hook port-start <id>
 pal hook port-end <id>
+
+# 세션 관리
+pal session list
+pal session show <id>
+pal session summary
 
 # 파이프라인
 pal pipeline list
@@ -308,19 +393,24 @@ pal serve
 .
 ├── CLAUDE.md           # 이 파일 (프로젝트 컨텍스트)
 ├── agents/             # 에이전트 정의
+│   ├── core/           # 코어 에이전트
+│   └── workers/        # 워커 에이전트
 ├── ports/              # 포트 명세
 ├── conventions/        # 컨벤션 문서
 ├── .claude/
 │   ├── settings.json   # Claude Code Hook 설정
-│   └── rules/          # 조건부 규칙
+│   └── rules/          # 조건부 규칙 (동적 생성)
 └── .pal/
-    └── config.yaml     # PAL Kit 설정 (설정 후 생성)
+    ├── config.yaml     # PAL Kit 설정
+    ├── sessions/       # 세션 기록
+    ├── decisions/      # ADR
+    └── context/        # 컨텍스트 파일
 ` + "```" + `
 
 ---
 
 <!-- pal:config:status=pending -->
-<!-- 
+<!--
   PAL Kit 설정 상태: 미완료
   설정 완료 후 이 섹션이 업데이트됩니다.
 -->
@@ -422,9 +512,9 @@ const conventionTemplate = `# {{.Name}}
 
 ## 규칙
 
-### 1. 
+### 1.
 
-### 2. 
+### 2.
 
 ## 예시
 
@@ -440,5 +530,195 @@ const conventionTemplate = `# {{.Name}}
 
 ## 예외
 
-- 
+-
+`
+
+// Support Agent 템플릿
+
+const domainSpecTemplate = `# {{.DomainName}} 도메인 명세
+
+> 생성일: {{.Date}}
+
+---
+
+## 개요
+
+{{.DomainName}} 도메인은 ...
+
+---
+
+## 핵심 개념
+
+### 엔티티
+
+| 이름 | 설명 | 속성 |
+|------|------|------|
+| - | - | - |
+
+### 값 객체
+
+| 이름 | 설명 | 속성 |
+|------|------|------|
+| - | - | - |
+
+---
+
+## 경계 컨텍스트
+
+### 포함
+
+-
+
+### 제외
+
+-
+
+---
+
+## 도메인 이벤트
+
+| 이벤트 | 트리거 | 페이로드 |
+|--------|--------|----------|
+| - | - | - |
+
+---
+
+## 관련 포트
+
+| 포트 ID | 레이어 | 설명 |
+|---------|--------|------|
+| - | - | - |
+
+---
+
+## 비즈니스 규칙
+
+자세한 비즈니스 규칙은 [rules.md](./rules.md) 참조
+
+---
+
+## 관련 문서
+
+- [[관련 문서 1]]
+- [[관련 문서 2]]
+
+---
+
+tags: #domain/{{.DomainName}} #type/domain-spec
+`
+
+const businessRuleTemplate = `# {{.DomainName}} 비즈니스 규칙
+
+> 생성일: {{.Date}}
+> 도메인: {{.DomainName}}
+
+---
+
+## 규칙 목록
+
+### BR-001: 규칙 이름
+
+**설명**: 규칙 설명
+
+**조건**:
+- 조건 1
+- 조건 2
+
+**결과**:
+- 결과 1
+
+**예외**:
+- 예외 상황
+
+` + "```" + `pseudo
+IF 조건1 AND 조건2
+THEN 결과
+` + "```" + `
+
+---
+
+### BR-002: 규칙 이름
+
+**설명**: ...
+
+---
+
+## 규칙 간 의존성
+
+` + "```" + `
+BR-001 → BR-002 (선행)
+BR-003 ← BR-001 (후행)
+` + "```" + `
+
+---
+
+## 검증 체크리스트
+
+- [ ] 모든 규칙에 예외 상황 정의됨
+- [ ] 규칙 간 충돌 없음
+- [ ] 도메인 전문가 검토 완료
+
+---
+
+tags: #domain/{{.DomainName}} #type/business-rule
+`
+
+const adrTemplate = `# ADR-{{.ADRID}}: {{.ADRTitle}}
+
+> 생성일: {{.Date}}
+> 상태: proposed
+
+---
+
+## 컨텍스트
+
+어떤 문제를 해결하려고 하는가?
+
+---
+
+## 결정
+
+무엇을 결정했는가?
+
+---
+
+## 대안
+
+### 대안 1: ...
+
+**장점**:
+-
+
+**단점**:
+-
+
+### 대안 2: ...
+
+**장점**:
+-
+
+**단점**:
+-
+
+---
+
+## 결과
+
+### 긍정적
+
+-
+
+### 부정적
+
+-
+
+---
+
+## 참고 자료
+
+-
+
+---
+
+<!-- adr:status=proposed -->
 `
