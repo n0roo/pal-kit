@@ -96,18 +96,10 @@ pal serve
 <!-- pal:active-worker:end -->
 
 <!-- pal:context:start -->
-> 마지막 업데이트: 2026-01-13 00:50
+> 마지막 업데이트: 2026-01-13 13:50:09
 
-### 최근 작업 (2026-01-13)
-- Agent 재귀 탐색 수정 (`internal/agent/agent.go`)
-- TUI Phase 1 구현:
-  - 리스트 선택 (j/k/g/G)
-  - 도움말 오버레이 (?)
-  - 상세 뷰 패널 (l/h) - 테스트 필요
-
-### 다음 작업
-- 상세 뷰 split layout 테스트
-- TUI Phase 2 (Ports View)
+### 활성 세션
+- **f11a283d**: -
 
 ### 포트 현황
 - ✅ complete: 12

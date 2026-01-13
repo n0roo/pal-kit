@@ -14,7 +14,9 @@ import (
 )
 
 var (
-	initForce bool
+	initForce           bool
+	initSkipTemplates   bool
+	initTemplatesForce  bool
 )
 
 var initCmd = &cobra.Command{
@@ -40,6 +42,8 @@ var initCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().BoolVar(&initForce, "force", false, "기존 설정 덮어쓰기")
+	initCmd.Flags().BoolVar(&initSkipTemplates, "skip-templates", false, "템플릿 설치 건너뛰기")
+	initCmd.Flags().BoolVar(&initTemplatesForce, "templates-force", false, "템플릿 강제 덮어쓰기")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -93,14 +97,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		created = append(created, "전역 DB에 프로젝트 등록")
 	}
 
-	// 5. Manifest 초기화 (파일 변경 추적)
+	// 5. 템플릿 설치 (agents, conventions)
+	if !initSkipTemplates {
+		if err := installTemplates(cwd, initTemplatesForce); err != nil {
+			fmt.Fprintf(os.Stderr, "경고: 템플릿 설치 실패: %v\n", err)
+		} else {
+			created = append(created, "에이전트 및 컨벤션 템플릿")
+		}
+	}
+
+	// 6. Manifest 초기화 (파일 변경 추적)
 	if err := initManifest(cwd); err != nil {
 		fmt.Fprintf(os.Stderr, "경고: Manifest 초기화 실패: %v\n", err)
 	} else {
 		created = append(created, ".pal/manifest.yaml")
 	}
 
-	// 6. .gitignore 업데이트
+	// 7. .gitignore 업데이트
 	if err := updateGitignore(cwd); err != nil {
 		fmt.Fprintf(os.Stderr, "경고: .gitignore 업데이트 실패: %v\n", err)
 	}

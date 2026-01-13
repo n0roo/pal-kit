@@ -17,13 +17,16 @@ func TestListTemplates(t *testing.T) {
 		t.Error("expected some templates, got none")
 	}
 
+	t.Logf("Found %d templates", len(templates))
+
 	// 필수 템플릿 확인
 	expectedTemplates := []string{
-		"core/collaborator.yaml",
 		"core/builder.yaml",
 		"core/planner.yaml",
-		"workers/backend/go.yaml",
-		"workers/frontend/react.yaml",
+		"agents/workers/backend/entity.yaml",
+		"agents/workers/frontend/ui.yaml",
+		"conventions/agents/core/builder.md",
+		"conventions/agents/workers/backend/entity.md",
 	}
 
 	templateSet := make(map[string]bool)
@@ -40,7 +43,7 @@ func TestListTemplates(t *testing.T) {
 
 func TestGetTemplate(t *testing.T) {
 	// 존재하는 템플릿
-	content, err := GetTemplate("core/collaborator.yaml")
+	content, err := GetTemplate("core/builder.yaml")
 	if err != nil {
 		t.Fatalf("GetTemplate failed: %v", err)
 	}
@@ -83,9 +86,16 @@ func TestGetTemplate_AllTemplates(t *testing.T) {
 			t.Errorf("GetTemplate(%s) returned empty content", tmpl)
 		}
 
-		// 기본 YAML 구조 확인
-		if !strings.Contains(string(content), "agent:") {
-			t.Errorf("template %s missing 'agent:' key", tmpl)
+		// YAML 파일만 agent: 키 확인
+		if strings.HasSuffix(tmpl, ".yaml") || strings.HasSuffix(tmpl, ".yml") {
+			if !strings.Contains(string(content), "agent:") {
+				t.Errorf("template %s missing 'agent:' key", tmpl)
+			}
+		}
+
+		// 모든 파일은 최소 10바이트 이상이어야 함
+		if len(content) < 10 {
+			t.Errorf("template %s too small: %d bytes", tmpl, len(content))
 		}
 	}
 }
