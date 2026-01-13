@@ -93,7 +93,7 @@ func (s *Service) EnsureDir() error {
 	return os.MkdirAll(s.conventionsDir, 0755)
 }
 
-// Load loads all conventions from the conventions directory
+// Load loads all conventions from the conventions directory (recursive)
 func (s *Service) Load() error {
 	s.conventions = make(map[string]*Convention)
 
@@ -101,28 +101,39 @@ func (s *Service) Load() error {
 		return nil
 	}
 
-	entries, err := os.ReadDir(s.conventionsDir)
-	if err != nil {
-		return fmt.Errorf("conventions 디렉토리 읽기 실패: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
-			continue
-		}
-
-		filePath := filepath.Join(s.conventionsDir, name)
-		conv, err := s.loadConventionFile(filePath)
+	// 재귀적으로 conventions/ 하위 모든 파일 탐색
+	err := filepath.WalkDir(s.conventionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil // 에러 발생한 경로는 스킵
+		}
+
+		if d.IsDir() {
+			return nil // 디렉토리는 계속 탐색
+		}
+
+		// .yaml, .yml, .md 파일만 처리
+		name := d.Name()
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".md") {
+			return nil
+		}
+
+		// 숨김 파일, 백업 파일 제외
+		if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".bak") || strings.HasSuffix(name, ".tmp") {
+			return nil
+		}
+
+		conv, err := s.loadConventionFile(path)
+		if err != nil {
+			// 로딩 실패한 파일은 스킵
+			return nil
 		}
 
 		s.conventions[conv.ID] = conv
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("conventions 디렉토리 탐색 실패: %w", err)
 	}
 
 	return nil
@@ -135,6 +146,15 @@ func (s *Service) loadConventionFile(filePath string) (*Convention, error) {
 		return nil, err
 	}
 
+	ext := filepath.Ext(filePath)
+	baseName := strings.TrimSuffix(filepath.Base(filePath), ext)
+
+	// .md 파일 처리
+	if ext == ".md" {
+		return s.loadMarkdownConvention(filePath, baseName, content)
+	}
+
+	// .yaml, .yml 파일 처리
 	var conv Convention
 	if err := yaml.Unmarshal(content, &conv); err != nil {
 		return nil, fmt.Errorf("YAML 파싱 실패: %w", err)
@@ -143,11 +163,43 @@ func (s *Service) loadConventionFile(filePath string) (*Convention, error) {
 	conv.FilePath = filePath
 
 	if conv.ID == "" {
-		baseName := filepath.Base(filePath)
-		conv.ID = strings.TrimSuffix(baseName, filepath.Ext(baseName))
+		conv.ID = baseName
 	}
 
 	return &conv, nil
+}
+
+// loadMarkdownConvention loads convention from markdown file
+func (s *Service) loadMarkdownConvention(filePath, baseName string, content []byte) (*Convention, error) {
+	// 상대 경로 계산 (conventions/ 기준)
+	relPath, err := filepath.Rel(s.conventionsDir, filePath)
+	if err != nil {
+		relPath = filePath
+	}
+
+	// 경로 기반 ID 생성: conventions/agents/core/builder.md → agents-core-builder
+	id := strings.ReplaceAll(relPath, string(filepath.Separator), "-")
+	id = strings.TrimSuffix(id, filepath.Ext(id))
+
+	// 타입 결정
+	convType := TypeCustom
+	if strings.Contains(relPath, "agents/core") || strings.Contains(relPath, "agents/workers") {
+		convType = TypeCodingStyle // agent convention
+	}
+
+	conv := &Convention{
+		ID:          id,
+		Name:        baseName,
+		Type:        convType,
+		Description: string(content), // 전체 내용을 description으로
+		Enabled:     true,
+		Priority:    5,
+		FilePath:    filePath,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	return conv, nil
 }
 
 // Get returns a convention by ID

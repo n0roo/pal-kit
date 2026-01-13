@@ -62,6 +62,13 @@ type Manifest struct {
 	Files     map[string]*TrackedFile `yaml:"files"`
 }
 
+// ManifestYAML is the YAML-safe version of Manifest
+type ManifestYAML struct {
+	Version   string                  `yaml:"version"`
+	UpdatedAt string                  `yaml:"updated_at"` // RFC3339 format
+	Files     map[string]*TrackedFile `yaml:"files"`
+}
+
 // ChangeRecord represents a file change
 type ChangeRecord struct {
 	ProjectRoot string     `json:"project_root"`
@@ -97,7 +104,7 @@ func (s *Service) GetManifestPath() string {
 // LoadManifest loads manifest from YAML file
 func (s *Service) LoadManifest() (*Manifest, error) {
 	path := s.GetManifestPath()
-	
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -111,16 +118,30 @@ func (s *Service) LoadManifest() (*Manifest, error) {
 		return nil, fmt.Errorf("manifest 읽기 실패: %w", err)
 	}
 
-	var manifest Manifest
-	if err := yaml.Unmarshal(data, &manifest); err != nil {
+	// YAML 파싱 (string timestamp)
+	var yamlManifest ManifestYAML
+	if err := yaml.Unmarshal(data, &yamlManifest); err != nil {
 		return nil, fmt.Errorf("manifest 파싱 실패: %w", err)
+	}
+
+	// string → time.Time 변환
+	updatedAt, err := time.Parse(time.RFC3339, yamlManifest.UpdatedAt)
+	if err != nil {
+		// 파싱 실패 시 현재 시간 사용
+		updatedAt = time.Now()
+	}
+
+	manifest := &Manifest{
+		Version:   yamlManifest.Version,
+		UpdatedAt: updatedAt,
+		Files:     yamlManifest.Files,
 	}
 
 	if manifest.Files == nil {
 		manifest.Files = make(map[string]*TrackedFile)
 	}
 
-	return &manifest, nil
+	return manifest, nil
 }
 
 // SaveManifest saves manifest to YAML file
@@ -132,7 +153,14 @@ func (s *Service) SaveManifest(manifest *Manifest) error {
 
 	manifest.UpdatedAt = time.Now()
 
-	data, err := yaml.Marshal(manifest)
+	// time.Time → string 변환하여 YAML 저장
+	yamlManifest := ManifestYAML{
+		Version:   manifest.Version,
+		UpdatedAt: manifest.UpdatedAt.Format(time.RFC3339), // 명시적 포맷
+		Files:     manifest.Files,
+	}
+
+	data, err := yaml.Marshal(yamlManifest)
 	if err != nil {
 		return fmt.Errorf("manifest 직렬화 실패: %w", err)
 	}
