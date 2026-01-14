@@ -67,7 +67,12 @@ func (s *Service) DeactivatePort(portID string) error {
 	return nil
 }
 
-// ListActiveRules returns list of active rule files
+// reservedRuleFiles are rule files managed by PAL Kit system, not ports
+var reservedRuleFiles = map[string]bool{
+	"workflow.md": true,
+}
+
+// ListActiveRules returns list of active rule files (port rules only)
 func (s *Service) ListActiveRules() ([]string, error) {
 	entries, err := os.ReadDir(s.rulesDir)
 	if err != nil {
@@ -80,6 +85,10 @@ func (s *Service) ListActiveRules() ([]string, error) {
 	var rules []string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			// 시스템 예약 파일 제외
+			if reservedRuleFiles[entry.Name()] {
+				continue
+			}
 			rules = append(rules, strings.TrimSuffix(entry.Name(), ".md"))
 		}
 	}

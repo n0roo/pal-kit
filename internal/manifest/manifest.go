@@ -23,6 +23,7 @@ const (
 	FileTypeConvention FileType = "convention" // conventions/*.yaml, *.md
 	FileTypePort       FileType = "port"       // ports/*.md
 	FileTypeConfig     FileType = "config"     // .pal/config.yaml
+	FileTypeDocs       FileType = "docs"       // docs/*.md
 )
 
 // FileStatus represents the status of a tracked file
@@ -227,6 +228,9 @@ func (s *Service) detectFileType(filePath string) FileType {
 	if strings.HasPrefix(filePath, "ports/") {
 		return FileTypePort
 	}
+	if strings.HasPrefix(filePath, "docs/") {
+		return FileTypeDocs
+	}
 	if filePath == ".pal/config.yaml" {
 		return FileTypeConfig
 	}
@@ -258,6 +262,10 @@ func (s *Service) ScanTrackedFiles() ([]string, error) {
 	// ports/
 	portFiles, _ := s.scanDirectory("ports", []string{".md"})
 	files = append(files, portFiles...)
+
+	// docs/
+	docsFiles, _ := s.scanDirectory("docs", []string{".md"})
+	files = append(files, docsFiles...)
 
 	return files, nil
 }

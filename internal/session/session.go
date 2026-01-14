@@ -10,10 +10,37 @@ import (
 
 // Session type constants
 const (
-	TypeSingle  = "single"  // 단일 세션
+	TypeSingle  = "single"  // 단일 세션 (legacy)
+	TypeMain    = "main"    // 메인 세션 (사용자가 직접 시작)
+	TypeSub     = "sub"     // 서브 세션 (Builder가 spawn)
 	TypeMulti   = "multi"   // 멀티 세션 (병렬 독립)
-	TypeSub     = "sub"     // 서브 세션 (상위에서 spawn)
 	TypeBuilder = "builder" // 빌더 세션 (파이프라인 관리)
+)
+
+// Event type constants
+const (
+	// 세션 이벤트
+	EventSessionStart = "session_start" // 세션 시작
+	EventSessionEnd   = "session_end"   // 세션 종료
+
+	// 포트 이벤트
+	EventPortStart = "port_start" // 포트 작업 시작
+	EventPortEnd   = "port_end"   // 포트 작업 완료
+
+	// 사용자 이벤트
+	EventUserRequest = "user_request" // 사용자 요구사항 입력
+
+	// 파일 이벤트
+	EventFileEdit     = "file_edit"     // 파일 수정 (추적됨)
+	EventUntrackedEdit = "untracked_edit" // 파일 수정 (추적 안됨)
+
+	// 의사결정 이벤트
+	EventDecision   = "decision"   // 주요 결정 사항
+	EventEscalation = "escalation" // 에스컬레이션 발생
+
+	// 시스템 이벤트
+	EventCompact      = "compact"       // 컨텍스트 컴팩트
+	EventZombieCleanup = "zombie_cleanup" // 좀비 세션 정리
 )
 
 // Session represents a work session
@@ -363,11 +390,32 @@ func (s *Service) FindActiveSession(claudeSessionID, cwd, projectRoot string) (*
 }
 
 // findByLocation finds a running session by cwd or project_root
+// Strategy: 1) Exact cwd match, 2) project_root match
 func (s *Service) findByLocation(cwd, projectRoot string) (*Session, error) {
+	// Strategy 1: 정확한 cwd 매칭 (가장 정확)
+	if cwd != "" {
+		sess, err := s.findByCwd(cwd)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	// Strategy 2: project_root 매칭 (같은 프로젝트의 다른 디렉토리)
+	if projectRoot != "" {
+		sess, err := s.findByProjectRoot(projectRoot)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	return nil, fmt.Errorf("해당 위치의 세션을 찾을 수 없습니다")
+}
+
+// findByCwd finds a running session with exact cwd match
+func (s *Service) findByCwd(cwd string) (*Session, error) {
 	var sess Session
 	var sessionType, parentSession sql.NullString
 
-	// cwd 또는 project_root로 검색
 	query := `
 		SELECT id, port_id, title, status,
 		       COALESCE(session_type, 'single'), parent_session,
@@ -376,13 +424,12 @@ func (s *Service) findByLocation(cwd, projectRoot string) (*Session, error) {
 		       cost_usd, compact_count, last_compact_at,
 		       claude_session_id, project_root, project_name, transcript_path, cwd
 		FROM sessions
-		WHERE status = 'running'
-		  AND (cwd = ? OR project_root = ?)
+		WHERE status = 'running' AND cwd = ?
 		ORDER BY started_at DESC
 		LIMIT 1
 	`
 
-	err := s.db.QueryRow(query, cwd, projectRoot).Scan(
+	err := s.db.QueryRow(query, cwd).Scan(
 		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
 		&sessionType, &parentSession,
 		&sess.StartedAt, &sess.EndedAt,
@@ -392,7 +439,7 @@ func (s *Service) findByLocation(cwd, projectRoot string) (*Session, error) {
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("해당 위치의 세션을 찾을 수 없습니다")
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
@@ -406,6 +453,60 @@ func (s *Service) findByLocation(cwd, projectRoot string) (*Session, error) {
 	sess.ParentSession = parentSession
 
 	return &sess, nil
+}
+
+// findByProjectRoot finds a running session in the same project
+func (s *Service) findByProjectRoot(projectRoot string) (*Session, error) {
+	var sess Session
+	var sessionType, parentSession sql.NullString
+
+	query := `
+		SELECT id, port_id, title, status,
+		       COALESCE(session_type, 'single'), parent_session,
+		       started_at, ended_at, jsonl_path,
+		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		       cost_usd, compact_count, last_compact_at,
+		       claude_session_id, project_root, project_name, transcript_path, cwd
+		FROM sessions
+		WHERE status = 'running' AND project_root = ?
+		ORDER BY started_at DESC
+		LIMIT 1
+	`
+
+	err := s.db.QueryRow(query, projectRoot).Scan(
+		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+		&sessionType, &parentSession,
+		&sess.StartedAt, &sess.EndedAt,
+		&sess.JSONLPath, &sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+		&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount, &sess.LastCompactAt,
+		&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName, &sess.TranscriptPath, &sess.Cwd,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if sessionType.Valid {
+		sess.SessionType = sessionType.String
+	} else {
+		sess.SessionType = TypeSingle
+	}
+	sess.ParentSession = parentSession
+
+	return &sess, nil
+}
+
+// CountRunningByProject counts running sessions in a project
+func (s *Service) CountRunningByProject(projectRoot string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM sessions
+		WHERE status = 'running' AND project_root = ?
+	`, projectRoot).Scan(&count)
+	return count, err
 }
 
 // findMostRecentRunning finds the most recent running session

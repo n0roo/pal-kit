@@ -62,6 +62,9 @@ func (s *Service) GenerateRulesContent(ctx *Context) string {
 	sb.WriteString(fmt.Sprintf("워크플로우: %s\n", ctx.WorkflowType))
 	sb.WriteString(fmt.Sprintf("설명: %s\n\n", config.WorkflowDescription(ctx.WorkflowType)))
 
+	// PAL Kit 필수 사용 규칙 (모든 워크플로우 공통)
+	sb.WriteString(s.generatePALKitRules())
+
 	// 워크플로우별 가이드
 	switch ctx.WorkflowType {
 	case config.WorkflowSimple:
@@ -84,6 +87,52 @@ func (s *Service) GenerateRulesContent(ctx *Context) string {
 	}
 
 	return sb.String()
+}
+
+// generatePALKitRules generates mandatory PAL Kit usage rules
+func (s *Service) generatePALKitRules() string {
+	return `---
+
+## ⚠️ PAL Kit 필수 사용 규칙
+
+> 이 프로젝트는 PAL Kit으로 관리됩니다. 아래 규칙을 **반드시** 준수하세요.
+
+### 🔴 코드 변경 전 필수 확인
+
+1. **활성 포트 확인**: 코드 수정 전에 활성 포트가 있는지 확인
+   - 포트가 없으면 작업이 추적되지 않습니다
+   - 포트 생성: ` + "`pal port create <id> --title \"작업명\"`" + `
+   - 포트 활성화: ` + "`pal hook port-start <id>`" + `
+
+2. **포트 없이 코드 수정 금지**
+   - Edit/Write 도구 사용 시 포트 필수
+   - 추적되지 않은 변경은 지식베이스에 기록되지 않음
+
+### 📋 작업 흐름
+
+` + "```" + `
+1. 요청 분석 → 포트 필요 여부 판단
+2. 포트 생성/활성화 → pal hook port-start <id>
+3. 작업 수행 → 코드 변경, 테스트
+4. 완료 → pal hook port-end <id>
+5. 커밋 → 변경사항 기록
+` + "```" + `
+
+### 🎯 이벤트 기록
+
+중요한 결정이나 에스컬레이션은 반드시 기록:
+- 결정 사항: ` + "`pal hook event decision \"결정 내용\"`" + `
+- 에스컬레이션: ` + "`pal hook event escalation \"에스컬레이션 내용\"`" + `
+
+### 📊 상태 확인 명령어
+
+- ` + "`pal status`" + ` - 전체 상태
+- ` + "`pal port list`" + ` - 포트 목록
+- ` + "`pal hook events`" + ` - 세션 이벤트
+
+---
+
+`
 }
 
 func (s *Service) generateSimpleGuide(ctx *Context) string {
@@ -238,6 +287,10 @@ func (s *Service) readAgentPrompt(path string) string {
 
 // WriteRulesFile writes workflow rules to .claude/rules/
 func (s *Service) WriteRulesFile(ctx *Context) error {
+	if s.projectRoot == "" {
+		return fmt.Errorf("projectRoot가 비어있습니다")
+	}
+
 	rulesDir := filepath.Join(s.projectRoot, ".claude", "rules")
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return fmt.Errorf("rules 디렉토리 생성 실패: %w", err)

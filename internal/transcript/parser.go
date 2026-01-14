@@ -152,3 +152,139 @@ func calculateCost(u *UsageDetail, p ModelPricing) float64 {
 	cost += float64(u.CacheCreationInputTokens) / 1_000_000 * p.CacheCreatePer1M
 	return cost
 }
+
+// UserMessage represents a user message from the transcript
+type UserMessage struct {
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp,omitempty"`
+	Index     int    `json:"index"`
+}
+
+// HumanEntry represents a human message entry in the JSONL
+type HumanEntry struct {
+	Type    string `json:"type"`
+	Message struct {
+		Content []ContentBlock `json:"content,omitempty"`
+		Text    string         `json:"text,omitempty"`
+	} `json:"message,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
+}
+
+// ContentBlock represents a content block in message
+type ContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// GetFirstUserMessage extracts the first user message from transcript
+func GetFirstUserMessage(path string) (*UserMessage, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("파일 열기 실패: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	index := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var entry HumanEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+
+		if entry.Type != "human" {
+			continue
+		}
+
+		// 첫 번째 사용자 메시지 추출
+		var content string
+		if entry.Message.Text != "" {
+			content = entry.Message.Text
+		} else if len(entry.Message.Content) > 0 {
+			for _, block := range entry.Message.Content {
+				if block.Type == "text" && block.Text != "" {
+					content = block.Text
+					break
+				}
+			}
+		}
+
+		if content != "" {
+			return &UserMessage{
+				Content:   content,
+				Timestamp: entry.Timestamp,
+				Index:     index,
+			}, nil
+		}
+		index++
+	}
+
+	return nil, fmt.Errorf("사용자 메시지를 찾을 수 없습니다")
+}
+
+// GetUserMessages extracts all user messages from transcript
+func GetUserMessages(path string, limit int) ([]UserMessage, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("파일 열기 실패: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	var messages []UserMessage
+	index := 0
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var entry HumanEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+
+		if entry.Type != "human" {
+			continue
+		}
+
+		var content string
+		if entry.Message.Text != "" {
+			content = entry.Message.Text
+		} else if len(entry.Message.Content) > 0 {
+			for _, block := range entry.Message.Content {
+				if block.Type == "text" && block.Text != "" {
+					content = block.Text
+					break
+				}
+			}
+		}
+
+		if content != "" {
+			messages = append(messages, UserMessage{
+				Content:   content,
+				Timestamp: entry.Timestamp,
+				Index:     index,
+			})
+
+			if limit > 0 && len(messages) >= limit {
+				break
+			}
+		}
+		index++
+	}
+
+	return messages, nil
+}

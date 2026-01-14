@@ -25,6 +25,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// escapeJSON escapes special characters for JSON string
+func escapeJSON(s string) string {
+	// 간단한 JSON 이스케이프 (줄바꿈, 탭, 큰따옴표)
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	return s
+}
+
 // HookInput represents the JSON input from Claude Code hooks
 // Based on Claude Code Hook specification
 type HookInput struct {
@@ -164,6 +183,43 @@ var hookSyncCmd = &cobra.Command{
 	RunE: runHookSync,
 }
 
+var hookEventCmd = &cobra.Command{
+	Use:   "event <type> <message>",
+	Short: "이벤트 로깅",
+	Long: `세션 이벤트를 기록합니다.
+
+이벤트 타입:
+- decision: 주요 결정 사항
+- escalation: 에스컬레이션 (사용자 개입 필요)
+- user_request: 사용자 요구사항
+
+예시:
+  pal hook event decision "JWT 인증 방식 채택"
+  pal hook event escalation "DB 스키마 변경 승인 필요"`,
+	Args: cobra.ExactArgs(2),
+	RunE: runHookEvent,
+}
+
+var hookEventType string
+var hookEventContext string
+
+var hookEventsCmd = &cobra.Command{
+	Use:   "events [session-id]",
+	Short: "이벤트 조회",
+	Long: `세션 이벤트를 조회합니다.
+
+session-id를 지정하지 않으면 현재 활성 세션의 이벤트를 조회합니다.
+
+예시:
+  pal hook events            # 현재 세션 이벤트
+  pal hook events abc123     # 특정 세션 이벤트`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runHookEvents,
+}
+
+var hookEventsLimit int
+var hookEventsTypeFilter string
+
 func init() {
 	rootCmd.AddCommand(hookCmd)
 	hookCmd.AddCommand(hookSessionStartCmd)
@@ -175,8 +231,13 @@ func init() {
 	hookCmd.AddCommand(hookPortStartCmd)
 	hookCmd.AddCommand(hookPortEndCmd)
 	hookCmd.AddCommand(hookSyncCmd)
+	hookCmd.AddCommand(hookEventCmd)
+	hookCmd.AddCommand(hookEventsCmd)
 
 	hookSessionStartCmd.Flags().StringVar(&hookPortID, "port", "", "시작할 포트 ID")
+	hookEventCmd.Flags().StringVar(&hookEventContext, "context", "", "추가 컨텍스트 (JSON)")
+	hookEventsCmd.Flags().IntVar(&hookEventsLimit, "limit", 20, "조회할 이벤트 수")
+	hookEventsCmd.Flags().StringVar(&hookEventsTypeFilter, "type", "", "이벤트 타입 필터")
 }
 
 func readHookInput() (*HookInput, error) {
@@ -258,11 +319,30 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 	if palSessionID == "" {
 		palSessionID = uuid.New().String()[:8]
 
+		// 동일 프로젝트에서 실행 중인 세션 수 확인
+		var runningCount int
+		var sessionType string
+		if projectRoot != "" {
+			runningCount, _ = sessionSvc.CountRunningByProject(projectRoot)
+		}
+
+		// 세션 타입 결정:
+		// - 다른 실행 중인 세션이 없으면 main
+		// - 있으면 sub (Builder가 spawn한 것으로 추정)
+		if runningCount == 0 {
+			sessionType = session.TypeMain
+		} else {
+			sessionType = session.TypeSub
+			// 멀티 세션 경고
+			fmt.Fprintf(os.Stderr, "⚠️  [PAL Kit] 이 프로젝트에 %d개의 다른 세션이 실행 중입니다.\n", runningCount)
+			fmt.Fprintf(os.Stderr, "   현재 세션: %s (cwd: %s)\n", palSessionID, cwd)
+		}
+
 		// 세션 시작 (프로젝트 정보 포함)
 		opts := session.StartOptions{
 			ID:              palSessionID,
 			PortID:          hookPortID,
-			SessionType:     session.TypeSingle,
+			SessionType:     sessionType,
 			ClaudeSessionID: input.SessionID, // Claude Code의 session_id
 			ProjectRoot:     projectRoot,
 			ProjectName:     projectName,
@@ -274,6 +354,28 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 			if verbose {
 				fmt.Fprintf(os.Stderr, "세션 시작: %v\n", err)
 			}
+		}
+
+		// 메인 세션인 경우 명시적으로 표시
+		if sessionType == session.TypeMain && verbose {
+			fmt.Printf("🏠 Main session started: %s\n", palSessionID)
+		}
+
+		// 첫 번째 사용자 메시지 캡처 (user_request 이벤트)
+		if input.TranscriptPath != "" {
+			go func(sessID, transcriptPath string) {
+				// transcript 파일이 아직 쓰이는 중일 수 있으므로 잠시 대기
+				time.Sleep(500 * time.Millisecond)
+
+				msg, err := transcript.GetFirstUserMessage(transcriptPath)
+				if err == nil && msg != nil && msg.Content != "" {
+					// 메시지를 500자로 제한
+					content := truncateString(msg.Content, 500)
+					eventData := fmt.Sprintf(`{"message":"%s","full_length":%d}`,
+						escapeJSON(content), len(msg.Content))
+					sessionSvc.LogEvent(sessID, session.EventUserRequest, eventData)
+				}
+			}(palSessionID, input.TranscriptPath)
 		}
 	}
 
@@ -406,6 +508,25 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 		} else if verbose {
 			fmt.Fprintf(os.Stderr, "⚠️  브리핑 생성 실패: %v\n", err)
 		}
+	}
+
+	// 포트 사용 안내 (Claude가 읽는 지침)
+	// 활성 포트가 없을 때만 안내
+	runningPorts, _ := portSvc.List("running", 1)
+	if len(runningPorts) == 0 {
+		fmt.Println("")
+		fmt.Println("<!-- pal:port-guidance")
+		fmt.Println("[PAL Kit 포트 사용 안내]")
+		fmt.Println("")
+		fmt.Println("⚠️ 현재 활성 포트가 없습니다.")
+		fmt.Println("코드 변경 작업을 시작하기 전에 포트를 활성화해야 작업이 추적됩니다.")
+		fmt.Println("")
+		fmt.Println("포트 활성화 방법:")
+		fmt.Println("1. 기존 포트 활성화: pal hook port-start <port-id>")
+		fmt.Println("2. 새 포트 생성: pal port create <id> --title \"작업명\" && pal hook port-start <id>")
+		fmt.Println("")
+		fmt.Println("포트 목록 확인: pal port list")
+		fmt.Println("-->")
 	}
 
 	return nil
@@ -575,7 +696,7 @@ func runHookPreToolUse(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Edit/Write 도구인 경우 Lock 확인
+	// Edit/Write 도구인 경우 활성 포트 확인
 	if input.ToolName == "Edit" || input.ToolName == "Write" {
 		filePath, ok := input.ToolInput["file_path"].(string)
 		if !ok {
@@ -588,10 +709,70 @@ func runHookPreToolUse(cmd *cobra.Command, args []string) error {
 		}
 		defer database.Close()
 
+		portSvc := port.NewService(database)
+		sessionSvc := session.NewService(database)
+
+		// 프로젝트 루트 찾기
+		cwd := input.Cwd
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		projectRoot := context.FindProjectRoot(cwd)
+
+		// 활성 포트 확인
+		runningPorts, _ := portSvc.List("running", 10)
+
+		// 현재 세션 찾기
+		claudeSessionID := input.SessionID
+		if claudeSessionID == "" {
+			claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+		}
+
+		var palSessionID string
+		palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+		if err == nil && palSession != nil {
+			palSessionID = palSession.ID
+		}
+
+		// 활성 포트가 없으면 경고
+		if len(runningPorts) == 0 {
+			// stderr로 Claude에 피드백 (Claude가 읽음)
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "⚠️  [PAL Kit] 활성 포트가 없습니다!")
+			fmt.Fprintln(os.Stderr, "   코드 변경이 추적되지 않습니다.")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "   포트를 활성화하려면:")
+			fmt.Fprintln(os.Stderr, "   1. pal port create <id> --title \"작업명\"")
+			fmt.Fprintln(os.Stderr, "   2. pal hook port-start <id>")
+			fmt.Fprintln(os.Stderr, "")
+
+			// untracked_edit 이벤트 로깅
+			if palSessionID != "" {
+				eventData := fmt.Sprintf(`{"tool":"%s","file":"%s","warning":"no_active_port"}`,
+					input.ToolName, filePath)
+				sessionSvc.LogEvent(palSessionID, "untracked_edit", eventData)
+			}
+		} else {
+			// 활성 포트가 있으면 포트 ID 표시
+			if verbose {
+				portIDs := make([]string, len(runningPorts))
+				for i, p := range runningPorts {
+					portIDs[i] = p.ID
+				}
+				fmt.Fprintf(os.Stderr, "📝 [PAL Kit] 활성 포트: %s\n", strings.Join(portIDs, ", "))
+			}
+
+			// 파일 수정 이벤트 로깅 (추적됨)
+			if palSessionID != "" && len(runningPorts) > 0 {
+				eventData := fmt.Sprintf(`{"tool":"%s","file":"%s","port":"%s"}`,
+					input.ToolName, filePath, runningPorts[0].ID)
+				sessionSvc.LogEvent(palSessionID, "file_edit", eventData)
+			}
+		}
+
+		// Lock 확인 (기존 로직 유지)
 		lockSvc := lock.NewService(database)
 		_ = lockSvc
-		_ = filePath
-		
 		// TODO: 파일 경로 기반 Lock 확인 로직
 	}
 
@@ -950,6 +1131,19 @@ func runHookSync(cmd *cobra.Command, args []string) error {
 
 	rulesSvc := rules.NewService(projectRoot)
 
+	// 워크플로우 rules 갱신
+	workflowSvc := workflow.NewService(projectRoot)
+	ctx, err := workflowSvc.GetContext()
+	if err == nil {
+		if err := workflowSvc.WriteRulesFile(ctx); err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "⚠️  워크플로우 rules 갱신 실패: %v\n", err)
+			}
+		} else if verbose {
+			fmt.Printf("📝 Workflow rules: %s\n", workflowSvc.GetRulesPath())
+		}
+	}
+
 	// running 포트 조회
 	runningPorts, err := portSvc.List("running", 100)
 	if err != nil {
@@ -996,6 +1190,17 @@ func runHookSync(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// 문서 인덱싱 실행
+	docSvc := document.NewService(database, projectRoot)
+	indexResult, err := docSvc.Index()
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "⚠️  문서 인덱싱 실패: %v\n", err)
+		}
+	} else if verbose && (indexResult.Added > 0 || indexResult.Updated > 0 || indexResult.Removed > 0) {
+		fmt.Printf("📚 문서 인덱싱: +%d /%d -%d\n", indexResult.Added, indexResult.Updated, indexResult.Removed)
+	}
+
 	// 컨텍스트 업데이트
 	ctxSvc := context.NewService(database)
 	claudeMD := context.FindClaudeMD(cwd)
@@ -1018,6 +1223,210 @@ func runHookSync(cmd *cobra.Command, args []string) error {
 		if deactivated > 0 {
 			fmt.Printf("   Deactivated: %d\n", deactivated)
 		}
+	}
+
+	return nil
+}
+
+func runHookEvent(cmd *cobra.Command, args []string) error {
+	eventType := args[0]
+	message := args[1]
+
+	// 허용된 이벤트 타입 확인
+	allowedTypes := map[string]string{
+		"decision":     session.EventDecision,
+		"escalation":   session.EventEscalation,
+		"user_request": session.EventUserRequest,
+	}
+
+	mappedType, ok := allowedTypes[eventType]
+	if !ok {
+		return fmt.Errorf("지원하지 않는 이벤트 타입: %s (허용: decision, escalation, user_request)", eventType)
+	}
+
+	// stdin에서 hook 입력 읽기
+	input, err := readHookInput()
+	if err != nil {
+		input = &HookInput{}
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	sessionSvc := session.NewService(database)
+	portSvc := port.NewService(database)
+
+	// 프로젝트 루트 찾기
+	cwd := input.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	projectRoot := context.FindProjectRoot(cwd)
+
+	// 현재 세션 찾기
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+
+	var palSessionID string
+	palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+	if err == nil && palSession != nil {
+		palSessionID = palSession.ID
+	}
+
+	if palSessionID == "" {
+		return fmt.Errorf("활성 세션을 찾을 수 없습니다")
+	}
+
+	// 활성 포트 ID 가져오기
+	var activePortID string
+	runningPorts, _ := portSvc.List("running", 1)
+	if len(runningPorts) > 0 {
+		activePortID = runningPorts[0].ID
+	}
+
+	// 이벤트 데이터 구성
+	eventData := fmt.Sprintf(`{"message":"%s","port_id":"%s"`,
+		escapeJSON(truncateString(message, 500)), activePortID)
+
+	if hookEventContext != "" {
+		eventData += fmt.Sprintf(`,"context":%s`, hookEventContext)
+	}
+	eventData += "}"
+
+	// 이벤트 로깅
+	if err := sessionSvc.LogEvent(palSessionID, mappedType, eventData); err != nil {
+		return fmt.Errorf("이벤트 로깅 실패: %w", err)
+	}
+
+	// 출력
+	if jsonOut {
+		output := map[string]interface{}{
+			"status":     "logged",
+			"event_type": mappedType,
+			"session_id": palSessionID,
+		}
+		if activePortID != "" {
+			output["port_id"] = activePortID
+		}
+		json.NewEncoder(os.Stdout).Encode(output)
+	} else {
+		icon := "📝"
+		switch mappedType {
+		case session.EventDecision:
+			icon = "🎯"
+		case session.EventEscalation:
+			icon = "🚨"
+		case session.EventUserRequest:
+			icon = "💬"
+		}
+		fmt.Printf("%s 이벤트 기록: %s\n", icon, mappedType)
+		fmt.Printf("   세션: %s\n", palSessionID)
+		if activePortID != "" {
+			fmt.Printf("   포트: %s\n", activePortID)
+		}
+		fmt.Printf("   메시지: %s\n", truncateString(message, 100))
+	}
+
+	return nil
+}
+
+func runHookEvents(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	sessionSvc := session.NewService(database)
+
+	var targetSessionID string
+
+	if len(args) > 0 {
+		// 특정 세션 ID 지정
+		targetSessionID = args[0]
+	} else {
+		// 현재 활성 세션 찾기
+		cwd, _ := os.Getwd()
+		projectRoot := context.FindProjectRoot(cwd)
+		claudeSessionID := os.Getenv("CLAUDE_SESSION_ID")
+
+		palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+		if err == nil && palSession != nil {
+			targetSessionID = palSession.ID
+		}
+	}
+
+	if targetSessionID == "" {
+		return fmt.Errorf("세션을 찾을 수 없습니다")
+	}
+
+	// 이벤트 조회
+	events, err := sessionSvc.GetEvents(targetSessionID, hookEventsTypeFilter, hookEventsLimit)
+	if err != nil {
+		return fmt.Errorf("이벤트 조회 실패: %w", err)
+	}
+
+	if jsonOut {
+		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"session_id": targetSessionID,
+			"count":      len(events),
+			"events":     events,
+		})
+		return nil
+	}
+
+	fmt.Printf("📋 세션 이벤트: %s\n", targetSessionID)
+	fmt.Printf("   총 %d건\n\n", len(events))
+
+	if len(events) == 0 {
+		fmt.Println("   이벤트가 없습니다.")
+		return nil
+	}
+
+	// 이벤트 타입별 아이콘
+	typeIcons := map[string]string{
+		session.EventSessionStart:  "🚀",
+		session.EventSessionEnd:    "🏁",
+		session.EventPortStart:     "▶️",
+		session.EventPortEnd:       "✅",
+		session.EventUserRequest:   "💬",
+		session.EventDecision:      "🎯",
+		session.EventEscalation:    "🚨",
+		session.EventFileEdit:      "📝",
+		session.EventUntrackedEdit: "⚠️",
+		session.EventCompact:       "📦",
+	}
+
+	for _, e := range events {
+		icon := typeIcons[e.EventType]
+		if icon == "" {
+			icon = "📌"
+		}
+
+		timeStr := e.CreatedAt.Format("15:04:05")
+		fmt.Printf("%s %s [%s]\n", icon, e.EventType, timeStr)
+
+		// event_data에서 주요 정보 추출
+		if e.EventData != "" {
+			var data map[string]interface{}
+			if json.Unmarshal([]byte(e.EventData), &data) == nil {
+				if msg, ok := data["message"].(string); ok {
+					fmt.Printf("   %s\n", truncateString(msg, 80))
+				}
+				if portID, ok := data["port_id"].(string); ok && portID != "" {
+					fmt.Printf("   포트: %s\n", portID)
+				}
+				if file, ok := data["file"].(string); ok && file != "" {
+					fmt.Printf("   파일: %s\n", filepath.Base(file))
+				}
+			}
+		}
+		fmt.Println()
 	}
 
 	return nil

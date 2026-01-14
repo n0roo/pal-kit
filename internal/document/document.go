@@ -73,6 +73,7 @@ func (s *Service) Index() (*IndexResult, error) {
 		{"ports", "port", []string{"*.md"}},
 		{"conventions", "convention", []string{"*.md"}},
 		{"agents", "agent", []string{"*.yaml", "*.yml"}},
+		{"docs", "docs", []string{"*.md"}},
 		{".pal/sessions", "session", []string{"*.md"}},
 		{".pal/decisions", "adr", []string{"*.md"}},
 	}
@@ -714,6 +715,8 @@ func (s *Service) RefreshDocument(path string) error {
 		docType = "convention"
 	} else if strings.HasPrefix(path, "agents/") {
 		docType = "agent"
+	} else if strings.HasPrefix(path, "docs/") {
+		docType = "docs"
 	}
 
 	_, _, err := s.indexFile(fullPath, docType)
