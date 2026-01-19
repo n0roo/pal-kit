@@ -20,6 +20,7 @@ agent:
     - 단위 테스트 작성
 
   conventions_ref: conventions/agents/workers/backend/service.md
+  rules_ref: agents/workers/backend/service.rules.md
 
   port_types:
     - tpl-server-l2-port

@@ -39,10 +39,20 @@ agent:
 
   tools:
     cli:
+      # Legacy docs commands (for compatibility)
       - pal docs search
       - pal docs port
       - pal docs get
       - pal docs index
+      # New KB commands
+      - pal kb search         # 문서 검색
+      - pal kb index          # 색인 구축
+      - pal kb stats          # 문서 통계
+      - pal kb classify       # 분류 추천
+      - pal kb lint           # 문서 품질 검사
+      - pal kb link check     # 링크 검사
+      - pal kb tag list       # 태그 목록
+      # Templates
       - pal template list
       - pal template create
 
@@ -52,10 +62,15 @@ agent:
     summary_threshold: 2000  # 요약 필요 기준
 
   search_patterns:
+    # Legacy patterns (docs-management)
     domain_docs: "domain:{domain} type:l1"
     conventions: "type:convention"
     port_spec: "type:port"
     business_rules: "domain:{domain} type:business"
+    # KB patterns
+    kb_domain: "--domain {domain}"
+    kb_type: "--type {type}"
+    kb_tags: "--tag {tag}"
 
   output_format: |
     ## 검색 결과

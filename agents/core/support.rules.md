@@ -166,6 +166,39 @@ pal template create adr --title "결정 제목"
 
 ## PAL 명령어 참조
 
+### KB 명령어 (권장)
+
+```bash
+# 문서 검색 (SQLite FTS 기반)
+pal kb search "query"               # 전문 검색
+pal kb search "query" --type port   # 타입 필터
+pal kb search "query" --domain auth # 도메인 필터
+pal kb search "query" --tag api     # 태그 필터
+pal kb search "query" --limit 20    # 결과 수 제한
+pal kb search "query" --budget 5000 # 토큰 예산
+
+# 색인 및 통계
+pal kb index                        # 색인 구축
+pal kb index --rebuild              # 전체 재색인
+pal kb stats                        # 문서 통계
+
+# 분류 추천
+pal kb classify {file}              # 분류 추천
+pal kb classify {file} --json       # JSON 출력
+
+# 문서 품질 검사
+pal kb lint {file}                  # 단일 파일 검사
+pal kb lint {directory}             # 디렉토리 검사
+pal kb lint {path} --strict         # 엄격 모드
+
+# 링크/태그 관리
+pal kb link check                   # 깨진 링크 검사
+pal kb tag list                     # 태그 목록
+pal kb tag orphan                   # 미사용 태그
+```
+
+### Legacy 명령어 (호환성)
+
 ```bash
 # 문서 검색
 pal docs search "query"           # 전체 검색
@@ -189,3 +222,33 @@ pal docs stats                    # 문서 통계
 pal template list                 # 템플릿 목록
 pal template create {type}        # 템플릿 생성
 ```
+
+---
+
+## KB 활용 가이드
+
+### 분류 추천 사용
+
+새 문서 작성 시 적절한 분류가 필요하면:
+
+```bash
+pal kb classify {file}
+```
+
+→ 문서 타입, 도메인, 태그를 추천받을 수 있습니다.
+
+### 문서 품질 검사
+
+문서 작성 후 품질 확인:
+
+```bash
+pal kb lint {file}
+```
+
+→ Frontmatter 필수 필드, 링크 유효성, 태그 형식 등을 검사합니다.
+
+### 검색 팁
+
+1. 도메인별 검색: `pal kb search "인증" --domain auth`
+2. 타입별 검색: `pal kb search "api" --type port`
+3. 토큰 예산 설정: `pal kb search "query" --budget 3000`
