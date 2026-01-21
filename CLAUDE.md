@@ -1,290 +1,183 @@
-# pal-kit
+# PAL Kit v1.0
 
-> PAL Kit CLI 도구 프로젝트 | Go 기반
+> Personal Agentic Layer - Claude Code 에이전트 오케스트레이션 도구
 
----
+## 현재 버전
 
-## 프로젝트 개요
+**v1.0-redesign** (개발 중)
 
-PAL Kit은 Claude Code와 함께 사용하는 프로젝트 관리 CLI 도구입니다.
-포트 기반 작업 관리, 에이전트 시스템, 파이프라인 워크플로우를 제공합니다.
+## 아키텍처
 
----
+```
+User (Claude Desktop) ─── Spec Agent (MCP)
+         │
+         ▼
+    Build Session ──── HTTP API ──── Electron GUI
+         │
+    ┌────┴────┐
+    ▼         ▼
+  Operator   Operator
+    │           │
+  Workers    Workers
+```
 
-## 기술 스택
+## 세션 계층
 
-- **언어**: Go
-- **구조**: cmd/, internal/ 기반 표준 Go 레이아웃
+| Type | 역할 | Depth |
+|------|------|-------|
+| **build** | 명세 설계, 포트 분해 | 0 |
+| **operator** | 워커 관리, 진행 조율 | 1 |
+| **worker** | 코드 구현 | 2 |
+| **test** | 테스트 작성/실행 | 3 |
 
----
+## 핵심 패키지 (v1.0)
 
-## PAL Kit 통합 가이드
+### 신규 패키지
 
-### 세션 시작 시 필수 체크
+- `internal/analytics/` - DuckDB 연동 (문서 색인, 통계)
+- `internal/message/` - 세션 간 메시지 패싱
+- `internal/agentv2/` - 에이전트 버전 관리
+- `internal/attention/` - Attention 추적, Compact 관리
 
-**매 세션 시작 시 아래 순서로 상태를 확인합니다:**
+### 확장된 패키지
+
+- `internal/db/` - 스키마 v10 (세션 계층, 에이전트, 메시지)
+- `internal/session/` - 계층적 세션 지원 (hierarchy.go)
+
+## Storage
+
+```
+SQLite (OLTP)           DuckDB (OLAP)
+├── sessions            ├── docs-index.json
+├── messages            ├── conventions.json
+├── agents              └── token-history.parquet
+├── agent_versions
+├── compact_events
+└── port_handoffs
+```
+
+## 주요 명령어
 
 ```bash
-# 1. 전체 상태 확인
-pal status
-
-# 2. 활성/대기 포트 확인
-pal port list
-
-# 3. 이전 세션 기록 확인 (있는 경우)
-ls -la .pal/sessions/
-```
-
-**확인 후 행동:**
-- 활성 포트가 있으면 → 해당 포트 작업 우선
-- `.claude/rules/{port-id}.md` 있으면 → 해당 rule 참조
-- 블로커가 있으면 → 해결 또는 에스컬레이션
-
----
-
-### 서브에이전트(Task tool) 활용 패턴
-
-**복잡한 작업은 Task tool로 서브에이전트에 위임합니다.**
-
-| 작업 유형 | 서브에이전트 | Task tool 사용 |
-|----------|-------------|---------------|
-| 새 기능 구현 | Explore → Plan → 구현 | ✅ 적극 사용 |
-| 코드 탐색 | Explore agent | ✅ 사용 |
-| 아키텍처 분석 | Plan agent | ✅ 사용 |
-| 단순 수정 | 직접 수행 | ❌ 불필요 |
-
-**서브에이전트 활성화 예시:**
-
-```
-# 1. 복잡한 기능 구현 시
-User: "주문 기능 구현해줘"
-Claude:
-  1. Task(Explore) → 기존 코드 구조 파악
-  2. Task(Plan) → 구현 계획 수립
-  3. 직접 구현 또는 추가 Task 분할
-
-# 2. 코드 분석 시
-User: "에러 핸들링 어떻게 되어있어?"
-Claude:
-  1. Task(Explore) → 에러 핸들링 패턴 탐색
-  2. 결과 요약 제공
-```
-
----
-
-### 포트 기반 작업 흐름
-
-**포트(Port)는 작업의 기본 단위입니다.**
-
-```
-1. 포트 확인
-   pal port list
-
-2. 포트 시작 (Rule 자동 생성)
-   pal hook port-start <port-id>
-   → .claude/rules/{port-id}.md 생성됨
-
-3. 작업 진행
-   - Rule 파일 참조하며 작업
-   - 완료 체크리스트 확인
-
-4. 포트 완료
-   pal hook port-end <port-id>
-   → Rule 파일 정리됨
-```
-
-**포트 명세 구조 (ports/*.md):**
-```markdown
-# {포트 ID}
-## 목표: {달성할 목표}
-## 범위: {포함/제외 항목}
-## 완료 조건: {체크리스트}
-## 의존성: {선행 포트}
-```
-
----
-
-### 동적 Rule 활용
-
-**포트 시작 시 `.claude/rules/` 에 Rule이 자동 생성됩니다.**
-
-```
-.claude/rules/
-└── {port-id}.md    # 포트별 작업 지침
-```
-
-**Rule 파일 포함 내용:**
-- 포트 목표 및 범위
-- 적용할 워커/컨벤션
-- 완료 체크리스트
-- 에스컬레이션 기준
-
-**Claude는 활성 Rule을 우선 참조하여 작업합니다.**
-
----
-
-### Core vs Worker 에이전트
-
-| 구분 | Core 에이전트 | Worker 에이전트 |
-|------|-------------|----------------|
-| 역할 | 조율/관리 | 실제 구현 |
-| 기술 종속 | 없음 | 있음 (Kotlin, Go 등) |
-| 예시 | builder, planner, operator | entity-worker, router-worker |
-
-**에이전트 선택 기준:**
-- 계획/설계 → Core (planner, architect)
-- 코드 구현 → Worker (entity, service, router)
-- 상태 관리 → Core (operator)
-- 테스트 → Core (tester) + Worker (test-worker)
-
----
-
-### 작업 완료 시 기록
-
-**중요한 작업 완료 시 기록을 남깁니다:**
-
-```bash
-# 세션 요약 저장 위치
-.pal/sessions/{date}-{session-id}.md
-
-# 아키텍처 결정 기록 (ADR)
-.pal/decisions/ADR-{번호}-{제목}.md
-```
-
-**ADR 생성 기준:**
-- 아키텍처 변경
-- 기술 스택 선택
-- 중요한 설계 결정
-- 트레이드오프 선택
-
----
-
-## 워크플로우
-
-**integrate** - 빌더 관리, 서브세션 방식
-
-복잡한 기능 개발과 여러 기술 스택을 다루는 작업에 적합합니다.
-
----
-
-## 에이전트
-
-### Core 에이전트
-
-| 에이전트 | 역할 | 활용 시점 |
-|---------|------|----------|
-| builder | 요구사항 분석, 포트 분해 | 새 기능 시작 |
-| planner | 작업 계획, 우선순위 | 복잡한 작업 계획 |
-| architect | 설계 검토, 의존성 검증 | 아키텍처 결정 |
-| operator | 운영/연속성 관리 | 세션 시작/종료 |
-| tester | 품질 검증, TC 관리 | 테스트 단계 |
-
-### Worker 에이전트
-
-| 에이전트 | 기술 스택 | 담당 영역 |
-|---------|----------|----------|
-| entity-worker | Kotlin/JPA | L1 Entity, Repository |
-| cache-worker | Redis | L1 Cache |
-| document-worker | MongoDB | L1 Document |
-| service-worker | Kotlin/Spring | LM/L2 Service |
-| router-worker | Kotlin/Spring MVC | L3 Controller |
-| test-worker | JUnit/MockK | 테스트 보완 |
-| worker-go | Go | Go 코드 작성 |
-
----
-
-## PAL Kit 명령어
-
-```bash
-# 상태 확인
-pal status
-
-# 포트 관리
-pal port list
-pal port create <id> --title "작업명"
-pal port status <id>
-
-# 작업 시작/종료 (Rule 자동 생성/정리)
-pal hook port-start <id>
-pal hook port-end <id>
+# 초기화
+pal init
 
 # 세션 관리
-pal session list
-pal session summary
+pal session start --type build --title "명세 설계"
+pal session list --type operator
+pal session hierarchy <root-id>
 
-# 파이프라인
-pal pipeline list
-pal pl plan <n>
+# 포트 관리
+pal port create --type atomic --title "UserEntity"
+pal port list --type orchestration
+pal port analyze <port-id>  # 토큰 분석
 
-# Manifest 관리
-pal manifest status
-pal manifest sync
+# 에이전트 관리
+pal agent list
+pal agent version <agent-id>
+pal agent compare <agent-id> --v1 1 --v2 2
 
-# 대시보드
-pal serve
+# 상태 확인
+pal status
+pal attention <session-id>
 ```
 
----
+## 개발 가이드
 
-## 디렉토리 구조
+### 세션 생성 (계층적)
 
+```go
+import "github.com/n0roo/pal-kit/internal/session"
+
+svc := session.NewService(db)
+
+// Build 세션 생성
+build, _ := svc.StartHierarchical(session.HierarchyStartOptions{
+    Title: "user-service 명세 설계",
+    Type:  session.TypeBuild,
+    TokenBudget: 50000,
+})
+
+// Operator 세션 생성
+operator, _ := svc.StartHierarchical(session.HierarchyStartOptions{
+    Title:    "user-entity-group",
+    Type:     session.TypeOperator,
+    ParentID: build.Session.ID,
+})
+
+// Worker 세션 생성
+worker, _ := svc.StartHierarchical(session.HierarchyStartOptions{
+    Title:    "UserEntity 구현",
+    Type:     session.TypeWorker,
+    ParentID: operator.Session.ID,
+    PortID:   "port-001",
+    AgentID:  "impl-worker",
+})
 ```
-.
-├── CLAUDE.md           # 프로젝트 컨텍스트 (이 파일)
-├── cmd/                # CLI 진입점
-├── internal/           # 내부 패키지
-├── docs/               # 문서
-│   ├── ARCHITECTURE.md # 아키텍처 설명
-│   └── PACKAGE-GUIDE.md# 패키지 가이드
-├── agents/             # 에이전트 정의
-│   ├── core/           # Core 에이전트 YAML
-│   └── workers/        # Worker 에이전트 YAML
-├── ports/              # 포트 명세
-├── conventions/        # 컨벤션 문서
-│   └── agents/         # 에이전트별 컨벤션
-├── packages/           # 패키지 정의
-├── .claude/
-│   ├── settings.json   # Claude Code Hook 설정
-│   └── rules/          # 동적 Rule (포트별)
-└── .pal/
-    ├── config.yaml     # PAL Kit 설정
-    ├── manifest.yaml   # 파일 추적
-    ├── sessions/       # 세션 기록
-    ├── decisions/      # ADR
-    └── context/        # 현재 상태
+
+### 메시지 전송
+
+```go
+import "github.com/n0roo/pal-kit/internal/message"
+
+store := message.NewStore(db.DB)
+
+// 작업 할당
+store.SendTaskAssign(operatorID, workerID, portID, message.TaskAssignPayload{
+    PortID:   "port-001",
+    PortSpec: portContent,
+})
+
+// 구현 완료 알림
+store.SendImplReady(workerID, testWorkerID, portID, message.ImplReadyPayload{
+    Files:       []string{"user_entity.go"},
+    BuildStatus: "success",
+})
 ```
 
----
+### Attention 추적
 
-<!-- pal:config:status=configured -->
-<!--
-  PAL Kit 설정 상태: 완료
-  워크플로우: integrate
-  설정일: 2026-01-12
--->
+```go
+import "github.com/n0roo/pal-kit/internal/attention"
 
+store := attention.NewStore(db.DB)
 
-<!-- pal:active-worker:start -->
-<!-- pal:active-worker:end -->
+// 초기화
+store.Initialize(sessionID, portID, 15000)
 
-<!-- pal:context:start -->
-> 마지막 업데이트: 2026-01-15 01:44:30
+// 토큰 업데이트
+store.UpdateTokens(sessionID, 12000)
 
-### 활성 세션
-- **0068fc5c**: -
-- **0e7b2795**: impl-p4-test-0114
-- **a4236f8c**: -
-- **c777173a**: -
-- **f5c32ae6**: -
+// Compact 기록
+store.RecordCompact(&attention.CompactEvent{
+    SessionID:     sessionID,
+    TriggerReason: "token_limit",
+    BeforeTokens:  45000,
+    AfterTokens:   12000,
+    PreservedContext: []string{"current_task", "decisions"},
+})
 
-### 포트 현황
-- ✅ complete: 13
-- 🔄 running: 1
+// 리포트 생성
+report, _ := store.GenerateReport(sessionID)
+```
 
-### 진행 중인 작업
-- **knowledge-base**: Knowledge Base 구조 관리
+## Phase 1 완료 항목
 
-### 에스컬레이션
-- 없음
+- [x] DB 스키마 v10
+- [x] DuckDB analytics 패키지
+- [x] 메시지 패싱 패키지
+- [x] 에이전트 버전 관리 패키지
+- [x] Attention 추적 패키지
+- [x] 세션 계층 확장
 
-<!-- pal:context:end -->
+## Phase 2 예정
+
+- [ ] Worker Pair 스폰/관리
+- [ ] 포트 의존성 기반 실행
+- [ ] Handoff 프로토콜
+- [ ] Escalation 처리
+
+## 관련 문서
+
+- 설계: `mcp-docs/10-Personal/Projects/pal-kit/specs/`
+- 기존 문서: `docs/`

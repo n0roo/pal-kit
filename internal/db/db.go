@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -341,6 +341,215 @@ CREATE INDEX IF NOT EXISTS idx_marker_port_links_port ON marker_port_links(marke
 CREATE INDEX IF NOT EXISTS idx_marker_port_links_doc ON marker_port_links(document_id);
 `
 
+// v10: PAL Kit v1.0 재설계 - 세션 계층, 에이전트 버전, 메시지 패싱
+const schemaV10 = `
+-- ============================================================
+-- 에이전트 관리 (버전 관리 지원)
+-- ============================================================
+
+-- 에이전트 정의
+CREATE TABLE IF NOT EXISTS agents (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,                        -- spec, operator, worker, test
+    description TEXT,
+    capabilities TEXT,                         -- JSON: 에이전트 능력
+    current_version INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_type ON agents(type);
+CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+
+-- 에이전트 버전 히스토리
+CREATE TABLE IF NOT EXISTS agent_versions (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    version INTEGER NOT NULL,
+    spec_content TEXT NOT NULL,                -- 전체 에이전트 명세
+    spec_hash TEXT,                            -- 내용 해시 (변경 감지)
+    change_summary TEXT,                       -- 변경 사항 요약
+    change_reason TEXT,                        -- 변경 이유
+    avg_attention_score REAL,                  -- 이 버전의 평균 Attention
+    avg_completion_rate REAL,
+    avg_token_efficiency REAL,
+    usage_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active',              -- active, deprecated, experimental
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_versions_agent ON agent_versions(agent_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_versions_status ON agent_versions(status);
+
+-- 에이전트 성능 기록
+CREATE TABLE IF NOT EXISTS agent_performance (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id),
+    agent_version INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    attention_avg REAL,
+    attention_min REAL,
+    token_used INTEGER,
+    compact_count INTEGER,
+    completion_time_seconds INTEGER,
+    outcome TEXT,                              -- success, partial, failed
+    quality_score REAL,                        -- 0.0~1.0
+    feedback TEXT,
+    improvement_suggestions TEXT,              -- JSON
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_performance_agent ON agent_performance(agent_id, agent_version);
+CREATE INDEX IF NOT EXISTS idx_agent_performance_session ON agent_performance(session_id);
+
+-- ============================================================
+-- 세션 Attention 추적
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS session_attention (
+    session_id TEXT PRIMARY KEY,
+    port_id TEXT,
+    current_context_hash TEXT,
+    loaded_tokens INTEGER DEFAULT 0,
+    available_tokens INTEGER,
+    focus_score REAL DEFAULT 1.0,
+    drift_count INTEGER DEFAULT 0,
+    last_compaction_at DATETIME,
+    loaded_files TEXT,                         -- JSON: 로드된 파일 목록
+    loaded_conventions TEXT,                   -- JSON: 주입된 컨벤션
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_attention_focus ON session_attention(focus_score);
+
+-- ============================================================
+-- Compact 이벤트 상세 추적
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS compact_events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    trigger_reason TEXT,                       -- token_limit, user_request, auto
+    before_tokens INTEGER,
+    after_tokens INTEGER,
+    preserved_context TEXT,                    -- JSON: 보존된 컨텍스트
+    discarded_context TEXT,                    -- JSON: 버려진 컨텍스트
+    checkpoint_before TEXT,
+    recovery_hint TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_compact_events_session ON compact_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_compact_events_time ON compact_events(created_at);
+
+-- ============================================================
+-- 메시지 패싱
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,             -- 대화 그룹 (포트 단위)
+    from_session TEXT NOT NULL,
+    to_session TEXT,                           -- NULL = broadcast
+    type TEXT NOT NULL,                        -- request, response, report, escalation
+    subtype TEXT,                              -- impl_complete, test_pass, test_fail, blocked
+    payload TEXT NOT NULL,                     -- JSON 구조화된 내용
+    attention_score REAL,                      -- 0.0~1.0 중요도
+    context_snapshot TEXT,                     -- 메시지 시점의 컨텍스트 요약
+    token_count INTEGER,                       -- 이 메시지의 토큰 수
+    cumulative_tokens INTEGER,                 -- 대화 누적 토큰
+    status TEXT DEFAULT 'pending',             -- pending, delivered, processed, expired
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    processed_at DATETIME,
+    port_id TEXT,
+    priority INTEGER DEFAULT 5                 -- 1(highest)~10(lowest)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_to_session ON messages(to_session, status);
+CREATE INDEX IF NOT EXISTS idx_messages_port ON messages(port_id);
+CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
+
+-- ============================================================
+-- Worker 세션 관리
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS worker_sessions (
+    id TEXT PRIMARY KEY,
+    orchestration_id TEXT,
+    port_id TEXT NOT NULL,
+    worker_type TEXT NOT NULL,                 -- impl, test, impl_test_pair, single
+    impl_session_id TEXT,
+    test_session_id TEXT,
+    status TEXT DEFAULT 'pending',
+    substatus TEXT,                            -- coding, building, testing, reviewing
+    result TEXT,                               -- JSON: {output, metrics, errors}
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_port ON worker_sessions(port_id);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_orch ON worker_sessions(orchestration_id);
+CREATE INDEX IF NOT EXISTS idx_worker_sessions_status ON worker_sessions(status);
+
+-- ============================================================
+-- 포트 Handoff (컨텍스트 전달)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS port_handoffs (
+    id TEXT PRIMARY KEY,
+    from_port_id TEXT NOT NULL,
+    to_port_id TEXT NOT NULL,
+    handoff_type TEXT,                         -- api_contract, file_list, type_def
+    content TEXT NOT NULL,                     -- JSON: 구조화된 전달 정보
+    token_count INTEGER,
+    max_token_budget INTEGER DEFAULT 2000,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_port_handoffs_from ON port_handoffs(from_port_id);
+CREATE INDEX IF NOT EXISTS idx_port_handoffs_to ON port_handoffs(to_port_id);
+
+-- ============================================================
+-- Build 세션 산출물
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS build_outputs (
+    id TEXT PRIMARY KEY,
+    build_session_id TEXT NOT NULL,
+    operator_count INTEGER DEFAULT 0,
+    worker_count INTEGER DEFAULT 0,
+    test_count INTEGER DEFAULT 0,
+    total_ports INTEGER DEFAULT 0,
+    port_hierarchy TEXT,                       -- JSON: 전체 포트 트리
+    dependency_graph TEXT,                     -- JSON: 포트 간 의존성
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_build_outputs_session ON build_outputs(build_session_id);
+
+-- ============================================================
+-- Orchestration 포트 (관리 명세)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS orchestration_ports (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    atomic_ports TEXT NOT NULL,                -- JSON: [{port_id, order, depends_on}]
+    status TEXT DEFAULT 'pending',             -- pending, running, complete, failed
+    current_port_id TEXT,
+    progress_percent INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME,
+    completed_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_orchestration_ports_status ON orchestration_ports(status);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -428,7 +637,12 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v9 스키마 적용 실패: %w", err)
 	}
 
-	// 11. 버전 저장
+	// 11. v10 적용 (PAL Kit v1.0 재설계)
+	if _, err := d.Exec(schemaV10); err != nil {
+		return fmt.Errorf("v10 스키마 적용 실패: %w", err)
+	}
+
+	// 12. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)
@@ -476,6 +690,48 @@ func (d *DB) migrate() error {
 		d.Exec(`ALTER TABLE sessions ADD COLUMN last_env TEXT`)
 		// projects에 논리 경로 컬럼 추가
 		d.Exec(`ALTER TABLE projects ADD COLUMN logical_root TEXT`)
+	}
+
+	// v9 -> v10: 세션 계층 구조 확장
+	if currentVersion < 10 {
+		// sessions 테이블에 계층 관련 컬럼 추가
+		d.Exec(`ALTER TABLE sessions ADD COLUMN parent_id TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN root_id TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN depth INTEGER DEFAULT 0`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN path TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN type TEXT DEFAULT 'single'`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN agent_id TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN agent_version INTEGER`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN substatus TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN attention_score REAL`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN token_budget INTEGER`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN context_snapshot TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN checkpoint_id TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN output_summary TEXT`)
+		
+		// 인덱스 추가
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_id)`)
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_root ON sessions(root_id)`)
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_type ON sessions(type)`)
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_path ON sessions(path)`)
+
+		// ports 테이블에 타입 컬럼 추가
+		d.Exec(`ALTER TABLE ports ADD COLUMN port_type TEXT DEFAULT 'atomic'`)
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_ports_type ON ports(port_type)`)
+
+		// port_dependencies 확장
+		d.Exec(`ALTER TABLE port_dependencies ADD COLUMN dependency_type TEXT`)
+		d.Exec(`ALTER TABLE port_dependencies ADD COLUMN required_outputs TEXT`)
+		d.Exec(`ALTER TABLE port_dependencies ADD COLUMN satisfied INTEGER DEFAULT 0`)
+		d.Exec(`ALTER TABLE port_dependencies ADD COLUMN satisfied_at DATETIME`)
+
+		// escalations 확장
+		d.Exec(`ALTER TABLE escalations ADD COLUMN to_session TEXT`)
+		d.Exec(`ALTER TABLE escalations ADD COLUMN type TEXT`)
+		d.Exec(`ALTER TABLE escalations ADD COLUMN severity TEXT DEFAULT 'medium'`)
+		d.Exec(`ALTER TABLE escalations ADD COLUMN context TEXT`)
+		d.Exec(`ALTER TABLE escalations ADD COLUMN suggestion TEXT`)
+		d.Exec(`ALTER TABLE escalations ADD COLUMN resolution TEXT`)
 	}
 
 	return nil
