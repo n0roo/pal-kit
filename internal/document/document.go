@@ -834,7 +834,7 @@ func (s *Service) CreateDocument(path, content string) error {
 	}
 	
 	// Index the new document
-	return s.Refresh(path)
+	return s.RefreshDocument(path)
 }
 
 // UpdateDocument updates an existing document's content
@@ -850,7 +850,7 @@ func (s *Service) UpdateDocument(id, content string) error {
 	}
 	
 	// Re-index
-	return s.Refresh(doc.Path)
+	return s.RefreshDocument(doc.Path)
 }
 
 // MoveDocument moves/renames a document
@@ -881,16 +881,17 @@ func (s *Service) MoveDocument(id, newPath string) error {
 	}
 	
 	// Index at new location
-	return s.Refresh(newPath)
+	return s.RefreshDocument(newPath)
 }
 
 // CopyDocument copies a document to a new location
 func (s *Service) CopyDocument(id, newPath string) error {
-	doc, err := s.Get(id)
+	// Verify document exists
+	_, err := s.Get(id)
 	if err != nil {
 		return err
 	}
-	
+
 	// Read original content
 	content, err := s.GetContent(id)
 	if err != nil {

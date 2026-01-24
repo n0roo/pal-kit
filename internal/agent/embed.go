@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed templates/*
+//go:embed all:templates
 var templateFS embed.FS
 
 // InstallTemplates copies embedded templates to the target directory
