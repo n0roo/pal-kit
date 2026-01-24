@@ -402,25 +402,18 @@ electron-gui/
 
 ## 관련 문서
 
+- **온보딩 가이드**: `docs/ONBOARDING.md`
 - 설계: `mcp-docs/10-Personal/Projects/pal-kit/specs/`
 - 기존 문서: `docs/`
 
 
 <!-- pal:context:start -->
-> 마지막 업데이트: 2026-01-24 13:01:44
-
-### 활성 세션
-- **da9de3b1**: -
-- **debd3560**: -
+> 마지막 업데이트: 2026-01-24 15:35:00
 
 ### 포트 현황
-- ✅ complete: 12
-- ⏳ pending: 1
-- 🔄 running: 2
-
-### 진행 중인 작업
-- **knowledge-base**: Knowledge Base 구조 관리
-- **pal-reliability**: PAL Kit 핵심 기능 안정화
+- ✅ complete: 15
+- ⏳ pending: 0
+- 🔄 running: 0
 
 ### 에스컬레이션
 - 없음
