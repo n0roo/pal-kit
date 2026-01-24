@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { 
-  LayoutDashboard, 
-  GitBranch, 
-  Layers, 
-  Users, 
+import {
+  LayoutDashboard,
+  GitBranch,
+  Layers,
+  Users,
   AlertTriangle,
   Activity,
   Settings,
-  FileText
+  FileText,
+  Globe,
+  BookOpen
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -19,7 +21,9 @@ import Orchestrations from './pages/Orchestrations'
 import Agents from './pages/Agents'
 import Attention from './pages/Attention'
 import Documents from './pages/Documents'
-import Settings from './pages/Settings'
+import SettingsPage from './pages/Settings'
+import GlobalAgents from './pages/GlobalAgents'
+import KnowledgeBase from './pages/KnowledgeBase'
 
 // Components
 import StatusBar from './components/StatusBar'
@@ -59,7 +63,9 @@ function App() {
     { path: '/sessions', icon: Layers, label: '세션' },
     { path: '/orchestrations', icon: GitBranch, label: 'Orchestration' },
     { path: '/agents', icon: Users, label: '에이전트' },
+    { path: '/global-agents', icon: Globe, label: '전역 에이전트' },
     { path: '/documents', icon: FileText, label: '문서' },
+    { path: '/knowledge-base', icon: BookOpen, label: 'KB' },
     { path: '/attention', icon: Activity, label: 'Attention' },
   ]
 
@@ -157,9 +163,11 @@ function App() {
               <Route path="/sessions" element={<Sessions />} />
               <Route path="/orchestrations" element={<Orchestrations />} />
               <Route path="/agents" element={<Agents />} />
+              <Route path="/global-agents" element={<GlobalAgents />} />
               <Route path="/documents" element={<Documents />} />
+              <Route path="/knowledge-base" element={<KnowledgeBase />} />
               <Route path="/attention" element={<Attention alerts={attentionAlerts} />} />
-              <Route path="/settings" element={<Settings />} />
+              <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </div>
 

@@ -1,20 +1,24 @@
 import { useState, useEffect } from 'react'
-import { 
-  Users, RefreshCw, GitCommit, TrendingUp, TrendingDown, 
-  Server, Folder, Eye, X, ChevronRight, Cpu, Code, FileText
+import {
+  Users, RefreshCw, GitCommit, TrendingUp, TrendingDown,
+  Server, Folder, Eye, X, ChevronRight, Cpu, Code, FileText,
+  GitBranch, LayoutGrid, FolderOpen
 } from 'lucide-react'
-import { useAgents } from '../hooks'
-import { AgentCard, MarkdownViewer } from '../components'
+import { useAgents, useProjects } from '../hooks'
+import { AgentCard, MarkdownViewer, AgentWorkflowPipeline } from '../components'
 import clsx from 'clsx'
 import type { Agent } from '../hooks/useApi'
 
 type TypeFilter = '' | 'spec' | 'operator' | 'worker' | 'test'
 type SourceFilter = 'all' | 'system' | 'project'
+type ViewMode = 'grid' | 'workflow'
 
 export default function Agents() {
   const { agents, loading, fetchAgents, getSpec, getVersions, compareVersions } = useAgents()
+  const { projects } = useProjects()
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('')
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
+  const [selectedProject, setSelectedProject] = useState<string>('')
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [spec, setSpec] = useState<string | null>(null)
   const [loadingSpec, setLoadingSpec] = useState(false)
@@ -23,6 +27,7 @@ export default function Agents() {
   const [compareV1, setCompareV1] = useState<number>(0)
   const [compareV2, setCompareV2] = useState<number>(0)
   const [showSpec, setShowSpec] = useState(true)
+  const [viewMode, setViewMode] = useState<ViewMode>('workflow')
 
   const handleFilterChange = (type: TypeFilter) => {
     setTypeFilter(type)
@@ -61,10 +66,18 @@ export default function Agents() {
     }
   }
 
-  // Filter agents by source
+  // Filter agents by source and project
   const filteredAgents = agents.filter(agent => {
-    if (sourceFilter === 'system') return agent.is_system
-    if (sourceFilter === 'project') return !agent.is_system
+    // Source filter
+    if (sourceFilter === 'system' && !agent.is_system) return false
+    if (sourceFilter === 'project' && agent.is_system) return false
+
+    // Project filter (only for project agents)
+    if (selectedProject && !agent.is_system) {
+      // Filter by project root path
+      if (agent.source && !agent.source.includes(selectedProject)) return false
+    }
+
     return true
   })
 
@@ -106,32 +119,77 @@ export default function Agents() {
               <Users size={24} className="text-purple-400" />
               에이전트
             </h1>
-            <button
-              onClick={() => fetchAgents(typeFilter, sourceFilter !== 'project')}
-              className="p-2 hover:bg-dark-700 rounded"
-              disabled={loading}
-            >
-              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            </button>
+            <div className="flex items-center gap-2">
+              {/* View mode toggle */}
+              <div className="flex bg-dark-700 rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('workflow')}
+                  className={clsx(
+                    'px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors',
+                    viewMode === 'workflow' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:text-dark-200'
+                  )}
+                  title="워크플로우 뷰"
+                >
+                  <GitBranch size={14} />
+                  워크플로우
+                </button>
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={clsx(
+                    'px-2 py-1 rounded text-xs flex items-center gap-1 transition-colors',
+                    viewMode === 'grid' ? 'bg-primary-600 text-white' : 'text-dark-400 hover:text-dark-200'
+                  )}
+                  title="그리드 뷰"
+                >
+                  <LayoutGrid size={14} />
+                  그리드
+                </button>
+              </div>
+
+              <button
+                onClick={() => fetchAgents(typeFilter, sourceFilter !== 'project')}
+                className="p-2 hover:bg-dark-700 rounded"
+                disabled={loading}
+              >
+                <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
 
-          {/* Source filter */}
-          <div className="flex gap-2 mb-3">
-            {sourceFilters.map(filter => (
-              <button
-                key={filter.value}
-                onClick={() => handleSourceFilterChange(filter.value)}
-                className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors',
-                  sourceFilter === filter.value
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-dark-700 text-dark-300 hover:bg-dark-600'
-                )}
+          {/* Source filter + Project selector */}
+          <div className="flex items-center gap-4 mb-3">
+            <div className="flex gap-2">
+              {sourceFilters.map(filter => (
+                <button
+                  key={filter.value}
+                  onClick={() => handleSourceFilterChange(filter.value)}
+                  className={clsx(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors',
+                    sourceFilter === filter.value
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-dark-700 text-dark-300 hover:bg-dark-600'
+                  )}
+                >
+                  <filter.icon size={14} />
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Project selector */}
+            <div className="flex items-center gap-2">
+              <FolderOpen size={16} className="text-dark-400" />
+              <select
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                className="px-3 py-1.5 bg-dark-800 border border-dark-600 rounded-lg text-sm min-w-[180px]"
               >
-                <filter.icon size={14} />
-                {filter.label}
-              </button>
-            ))}
+                <option value="">모든 프로젝트</option>
+                {projects.map(p => (
+                  <option key={p.root} value={p.root}>{p.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Type filter */}
@@ -153,87 +211,98 @@ export default function Agents() {
           </div>
         </div>
 
-        {/* Agent grid */}
-        <div className="flex-1 overflow-auto p-4">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <RefreshCw size={32} className="animate-spin text-dark-400" />
-            </div>
-          ) : filteredAgents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-dark-400">
-              <Users size={48} className="mb-4 opacity-50" />
-              <p>에이전트가 없습니다</p>
-            </div>
+        {/* Main content area */}
+        <div className="flex-1 overflow-hidden">
+          {viewMode === 'workflow' ? (
+            /* Workflow Pipeline View */
+            <AgentWorkflowPipeline
+              agents={filteredAgents}
+              onSelectAgent={handleSelectAgent}
+            />
           ) : (
-            <div className="space-y-6">
-              {/* System agents section */}
-              {systemAgents.length > 0 && sourceFilter !== 'project' && (
-                <div>
-                  <h2 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
-                    <Server size={14} />
-                    시스템 에이전트 ({systemAgents.length})
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {systemAgents.map(agent => (
-                      <div
-                        key={agent.id}
-                        onClick={() => handleSelectAgent(agent)}
-                        className={clsx(
-                          'p-3 rounded-lg border cursor-pointer transition-colors',
-                          selectedAgent?.id === agent.id
-                            ? 'bg-purple-600/20 border-purple-500/50'
-                            : 'bg-dark-800 border-dark-700 hover:border-dark-500'
-                        )}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
-                            {getTypeIcon(agent.type)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium truncate">{agent.name}</span>
-                              <span className="text-xs px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
-                                시스템
-                              </span>
-                            </div>
-                            <p className="text-xs text-dark-400 mt-0.5 truncate">
-                              {agent.description}
-                            </p>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-xs px-1.5 py-0.5 bg-dark-700 text-dark-300 rounded">
-                                {agent.type}
-                              </span>
-                              {agent.capabilities?.slice(0, 2).map(cap => (
-                                <span key={cap} className="text-xs text-dark-500">
-                                  {cap}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <ChevronRight size={16} className="text-dark-500" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            /* Grid View */
+            <div className="h-full overflow-auto p-4">
+              {loading ? (
+                <div className="flex items-center justify-center h-64">
+                  <RefreshCw size={32} className="animate-spin text-dark-400" />
                 </div>
-              )}
+              ) : filteredAgents.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-dark-400">
+                  <Users size={48} className="mb-4 opacity-50" />
+                  <p>에이전트가 없습니다</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* System agents section */}
+                  {systemAgents.length > 0 && sourceFilter !== 'project' && (
+                    <div>
+                      <h2 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                        <Server size={14} />
+                        시스템 에이전트 ({systemAgents.length})
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {systemAgents.map(agent => (
+                          <div
+                            key={agent.id}
+                            onClick={() => handleSelectAgent(agent)}
+                            className={clsx(
+                              'p-3 rounded-lg border cursor-pointer transition-colors',
+                              selectedAgent?.id === agent.id
+                                ? 'bg-purple-600/20 border-purple-500/50'
+                                : 'bg-dark-800 border-dark-700 hover:border-dark-500'
+                            )}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
+                                {getTypeIcon(agent.type)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium truncate">{agent.name}</span>
+                                  <span className="text-xs px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
+                                    시스템
+                                  </span>
+                                </div>
+                                <p className="text-xs text-dark-400 mt-0.5 truncate">
+                                  {agent.description}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1.5">
+                                  <span className="text-xs px-1.5 py-0.5 bg-dark-700 text-dark-300 rounded">
+                                    {agent.type}
+                                  </span>
+                                  {agent.capabilities?.slice(0, 2).map(cap => (
+                                    <span key={cap} className="text-xs text-dark-500">
+                                      {cap}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <ChevronRight size={16} className="text-dark-500" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-              {/* Project agents section */}
-              {projectAgents.length > 0 && sourceFilter !== 'system' && (
-                <div>
-                  <h2 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
-                    <Folder size={14} />
-                    프로젝트 에이전트 ({projectAgents.length})
-                  </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {projectAgents.map(agent => (
-                      <AgentCard
-                        key={agent.id}
-                        agent={agent}
-                        onClick={() => handleSelectAgent(agent)}
-                      />
-                    ))}
-                  </div>
+                  {/* Project agents section */}
+                  {projectAgents.length > 0 && sourceFilter !== 'system' && (
+                    <div>
+                      <h2 className="text-sm font-medium text-dark-400 mb-3 flex items-center gap-2">
+                        <Folder size={14} />
+                        프로젝트 에이전트 ({projectAgents.length})
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {projectAgents.map(agent => (
+                          <AgentCard
+                            key={agent.id}
+                            agent={agent}
+                            onClick={() => handleSelectAgent(agent)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

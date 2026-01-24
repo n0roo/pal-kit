@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
-import { 
-  FileText, Search, RefreshCw, Database, FolderTree, Tag,
-  ChevronRight, X, Eye, Hash, Clock, Filter, List
+import {
+  FileText, Search, RefreshCw, Database, Tag,
+  ChevronRight, X, Eye, Hash, Clock, List, FolderOpen
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { useDocuments, type Document, type DocumentFilters } from '../hooks'
+import { useDocuments, useProjects, type Document, type DocumentFilters } from '../hooks'
 import { MarkdownViewer, TocViewer } from '../components'
 
 type TypeFilter = '' | 'port' | 'convention' | 'agent' | 'docs' | 'session' | 'adr'
@@ -15,10 +15,12 @@ type ViewTab = 'preview' | 'toc'
 
 export default function Documents() {
   const { documents, stats, loading, indexing, fetchDocuments, reindex, getContent } = useDocuments()
-  
+  const { projects } = useProjects()
+
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
+  const [selectedProject, setSelectedProject] = useState<string>('')
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
   const [docContent, setDocContent] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
@@ -35,6 +37,11 @@ export default function Documents() {
     }, 300)
     return () => clearTimeout(timer)
   }, [searchQuery, typeFilter, statusFilter, fetchDocuments])
+
+  // Filter documents by project
+  const filteredDocuments = selectedProject
+    ? documents.filter(d => d.path.includes(selectedProject))
+    : documents
 
   const handleSelectDoc = async (doc: Document) => {
     setSelectedDoc(doc)
@@ -110,39 +117,40 @@ export default function Documents() {
               <FileText size={24} className="text-blue-400" />
               문서 관리
             </h1>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleReindex}
-                disabled={indexing}
-                className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded-lg text-sm"
-              >
-                <Database size={16} className={indexing ? 'animate-pulse' : ''} />
-                {indexing ? '인덱싱 중...' : '다시 인덱싱'}
-              </button>
-            </div>
+            <button
+              onClick={handleReindex}
+              disabled={indexing}
+              className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded-lg text-sm"
+            >
+              <Database size={16} className={indexing ? 'animate-pulse' : ''} />
+              {indexing ? '인덱싱 중...' : '다시 인덱싱'}
+            </button>
           </div>
 
-          {/* Stats */}
-          {stats && (
-            <div className="grid grid-cols-4 gap-3 mb-4">
-              <div className="bg-dark-800 rounded-lg p-3">
-                <div className="text-2xl font-bold">{stats.total_docs}</div>
-                <div className="text-xs text-dark-400">총 문서</div>
-              </div>
-              <div className="bg-dark-800 rounded-lg p-3">
-                <div className="text-2xl font-bold">{(stats.total_tokens / 1000).toFixed(1)}K</div>
-                <div className="text-xs text-dark-400">총 토큰</div>
-              </div>
-              <div className="bg-dark-800 rounded-lg p-3">
-                <div className="text-2xl font-bold">{Object.keys(stats.by_type || {}).length}</div>
-                <div className="text-xs text-dark-400">문서 타입</div>
-              </div>
-              <div className="bg-dark-800 rounded-lg p-3">
-                <div className="text-2xl font-bold">{Object.keys(stats.by_domain || {}).length}</div>
-                <div className="text-xs text-dark-400">도메인</div>
-              </div>
+          {/* Project selector + Stats */}
+          <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <FolderOpen size={16} className="text-dark-400" />
+              <select
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                className="px-3 py-1.5 bg-dark-800 border border-dark-600 rounded-lg text-sm min-w-[200px]"
+              >
+                <option value="">모든 프로젝트</option>
+                {projects.map(p => (
+                  <option key={p.root} value={p.root}>{p.name}</option>
+                ))}
+              </select>
             </div>
-          )}
+
+            {stats && (
+              <div className="flex items-center gap-4 text-sm text-dark-400">
+                <span>{stats.total_docs} 문서</span>
+                <span>{(stats.total_tokens / 1000).toFixed(1)}K 토큰</span>
+                <span>{Object.keys(stats.by_type || {}).length} 타입</span>
+              </div>
+            )}
+          </div>
 
           {/* Search */}
           <div className="relative mb-4">
@@ -151,7 +159,7 @@ export default function Documents() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="문서 검색 (경로, ID, 키워드...)"
+              placeholder="문서 검색 (ID, 경로, 키워드, 태그...)"
               className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-600 rounded-lg focus:border-primary-500 focus:outline-none"
             />
             {searchQuery && (
@@ -205,7 +213,7 @@ export default function Documents() {
             <div className="flex items-center justify-center h-64">
               <RefreshCw size={32} className="animate-spin text-dark-400" />
             </div>
-          ) : documents.length === 0 ? (
+          ) : filteredDocuments.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-dark-400">
               <FileText size={48} className="mb-4 opacity-50" />
               <p>문서가 없습니다</p>
@@ -213,7 +221,7 @@ export default function Documents() {
             </div>
           ) : (
             <div className="divide-y divide-dark-700">
-              {documents.map(doc => (
+              {filteredDocuments.map(doc => (
                 <div
                   key={doc.id}
                   onClick={() => handleSelectDoc(doc)}
@@ -226,7 +234,7 @@ export default function Documents() {
                     <div className={clsx('p-2 rounded-lg border', getTypeColor(doc.type))}>
                       <FileText size={16} />
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium truncate">{doc.id}</span>
@@ -234,9 +242,8 @@ export default function Documents() {
                           {doc.status}
                         </span>
                       </div>
-                      
+
                       <div className="flex items-center gap-2 text-xs text-dark-400 mb-2">
-                        <FolderTree size={12} />
                         <span className="truncate">{doc.path}</span>
                       </div>
 
@@ -245,13 +252,13 @@ export default function Documents() {
                           <Hash size={12} />
                           {doc.tokens.toLocaleString()} tokens
                         </span>
-                        
+
                         {doc.domain && (
                           <span className="px-1.5 py-0.5 bg-dark-700 rounded">
                             {doc.domain}
                           </span>
                         )}
-                        
+
                         {doc.tags && doc.tags.length > 0 && (
                           <div className="flex items-center gap-1">
                             <Tag size={12} className="text-dark-400" />
@@ -283,8 +290,8 @@ export default function Documents() {
       </div>
 
       {/* Detail sidebar */}
-      {selectedDoc && (
-        <div className="w-[420px] border-l border-dark-700 flex flex-col overflow-hidden">
+      {selectedDoc && docContent !== null && (
+        <div className="w-[480px] border-l border-dark-700 flex flex-col overflow-hidden">
           <div className="p-4 border-b border-dark-700">
             <div className="flex items-center justify-between mb-2">
               <h2 className="font-semibold truncate">{selectedDoc.id}</h2>
@@ -298,11 +305,8 @@ export default function Documents() {
                 <X size={18} />
               </button>
             </div>
-            
-            <div className="flex items-center gap-2 text-sm text-dark-400 mb-3">
-              <FolderTree size={14} />
-              <span className="truncate">{selectedDoc.path}</span>
-            </div>
+
+            <div className="text-xs text-dark-400 mb-3 truncate">{selectedDoc.path}</div>
 
             {/* Metadata */}
             <div className="grid grid-cols-2 gap-2 text-sm">
@@ -387,7 +391,7 @@ export default function Documents() {
               </div>
             ) : docContent ? (
               viewTab === 'preview' ? (
-                <div className="bg-dark-800 rounded-lg p-4 overflow-auto max-h-[calc(100vh-450px)]">
+                <div className="bg-dark-800 rounded-lg p-4 overflow-auto h-full">
                   <MarkdownViewer content={docContent} />
                 </div>
               ) : (
@@ -396,8 +400,8 @@ export default function Documents() {
                     <List size={14} />
                     문서 목차
                   </h3>
-                  <TocViewer 
-                    content={docContent} 
+                  <TocViewer
+                    content={docContent}
                     onSelect={scrollToHeading}
                   />
                 </div>

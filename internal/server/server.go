@@ -34,6 +34,7 @@ type Config struct {
 	Port        int
 	ProjectRoot string
 	DBPath      string
+	VaultPath   string // Knowledge Base vault path
 }
 
 // Server represents the web server
@@ -87,6 +88,12 @@ func (s *Server) Start() error {
 	// v2 API routes
 	s.RegisterV2Routes(mux)
 
+	// Projects API routes
+	s.RegisterProjectRoutes(mux)
+
+	// KB API routes
+	s.RegisterKBRoutes(mux)
+
 	// SSE (Server-Sent Events) for real-time updates
 	sseHub := NewSSEHub()
 	go sseHub.Run()
@@ -114,6 +121,8 @@ func (s *Server) Start() error {
 
 	log.Printf("🚀 PAL Kit Dashboard running at http://localhost:%d", s.config.Port)
 	log.Printf("📡 v2 API available at /api/v2/*")
+	log.Printf("📁 Projects API available at /api/v2/projects/*")
+	log.Printf("📚 KB API available at /api/v2/kb/*")
 	log.Printf("🔔 SSE events at /api/v2/events")
 	return s.srv.ListenAndServe()
 }
@@ -717,18 +726,21 @@ func (s *Server) handleEscalations(w http.ResponseWriter, r *http.Request) {
 
 // Run starts the server (convenience function)
 func Run(port int, projectRoot, dbPath string) error {
+	return RunWithConfig(Config{
+		Port:        port,
+		ProjectRoot: projectRoot,
+		DBPath:      dbPath,
+	})
+}
+
+// RunWithConfig starts the server with full configuration
+func RunWithConfig(config Config) error {
 	// Check if static files exist
 	if _, err := staticFiles.ReadFile("static/index.html"); err != nil {
 		// Create default files if not embedded
 		if err := createDefaultStaticFiles(); err != nil {
 			log.Printf("Warning: Could not create static files: %v", err)
 		}
-	}
-
-	config := Config{
-		Port:        port,
-		ProjectRoot: projectRoot,
-		DBPath:      dbPath,
 	}
 
 	server := NewServer(config)

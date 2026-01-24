@@ -11,3 +11,13 @@ export type { TocItem } from './MarkdownViewer'
 export { default as EventFeed, AttentionBanner, BuildStatusIndicator } from './EventFeed'
 export { default as SessionHierarchyTree, type SessionNodeData } from './SessionHierarchyTree'
 export { default as CompactAlertBanner, AttentionToasts } from './CompactAlertBanner'
+
+// Document Tree components
+export { default as DocumentTree } from './DocumentTree'
+export { default as DocumentBreadcrumb } from './DocumentBreadcrumb'
+
+// Knowledge Base components
+export * from './kb'
+
+// Agent Workflow components
+export * from './agent'

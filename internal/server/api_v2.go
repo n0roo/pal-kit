@@ -3,12 +3,15 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/n0roo/pal-kit/internal/agent"
 	"github.com/n0roo/pal-kit/internal/agentv2"
 	"github.com/n0roo/pal-kit/internal/attention"
+	"github.com/n0roo/pal-kit/internal/config"
 	"github.com/n0roo/pal-kit/internal/document"
 	"github.com/n0roo/pal-kit/internal/handoff"
 	"github.com/n0roo/pal-kit/internal/message"
@@ -36,6 +39,8 @@ func (s *Server) RegisterV2Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/handoffs/", s.withCORS(s.handleHandoffDetail))
 
 	// Agent v2 API
+	mux.HandleFunc("/api/v2/agents/global", s.withCORS(s.handleGlobalAgents))
+	mux.HandleFunc("/api/v2/agents/global/", s.withCORS(s.handleGlobalAgentDetail))
 	mux.HandleFunc("/api/v2/agents", s.withCORS(s.handleAgentsV2))
 	mux.HandleFunc("/api/v2/agents/", s.withCORS(s.handleAgentV2Detail))
 
@@ -50,6 +55,7 @@ func (s *Server) RegisterV2Routes(mux *http.ServeMux) {
 	// Document API (order matters: specific routes before wildcard)
 	mux.HandleFunc("/api/v2/documents/stats", s.withCORS(s.handleDocumentStats))
 	mux.HandleFunc("/api/v2/documents/index", s.withCORS(s.handleDocumentIndex))
+	mux.HandleFunc("/api/v2/documents/tree", s.withCORS(s.handleDocumentTree))
 	mux.HandleFunc("/api/v2/documents/", s.withCORS(s.handleDocumentDetail))
 	mux.HandleFunc("/api/v2/documents", s.withCORS(s.handleDocumentsV2))
 }
@@ -1092,6 +1098,12 @@ func (s *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle special routes that ServeMux might not match correctly
+	if id == "tree" {
+		s.handleDocumentTree(w, r)
+		return
+	}
+
 	// Check for content sub-resource
 	if strings.HasSuffix(id, "/content") {
 		id = strings.TrimSuffix(id, "/content")
@@ -1157,6 +1169,272 @@ func (s *Server) handleDocumentContent(w http.ResponseWriter, r *http.Request, i
 		"id":      id,
 		"content": content,
 	})
+}
+
+// DocumentTreeNode represents a node in the document tree
+type DocumentTreeNode struct {
+	Name     string              `json:"name"`
+	Path     string              `json:"path"`
+	Type     string              `json:"type"` // "file" or "directory"
+	DocType  string              `json:"doc_type,omitempty"`
+	Children []*DocumentTreeNode `json:"children,omitempty"`
+}
+
+func (s *Server) handleDocumentTree(w http.ResponseWriter, r *http.Request) {
+	root := r.URL.Query().Get("root")
+	if root == "" {
+		root = "."
+	}
+
+	depthStr := r.URL.Query().Get("depth")
+	maxDepth := 3
+	if depthStr != "" {
+		if d, err := strconv.Atoi(depthStr); err == nil && d > 0 {
+			maxDepth = d
+		}
+	}
+
+	basePath := filepath.Join(s.config.ProjectRoot, root)
+
+	// Check if path exists
+	info, err := os.Stat(basePath)
+	if err != nil {
+		s.errorResponse(w, 404, "Path not found")
+		return
+	}
+	if !info.IsDir() {
+		s.errorResponse(w, 400, "Path is not a directory")
+		return
+	}
+
+	// Build tree
+	tree := s.buildDocumentTree(basePath, root, 0, maxDepth)
+
+	s.jsonResponse(w, tree)
+}
+
+func (s *Server) buildDocumentTree(absPath, relPath string, depth, maxDepth int) *DocumentTreeNode {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil
+	}
+
+	node := &DocumentTreeNode{
+		Name: info.Name(),
+		Path: relPath,
+	}
+
+	if info.IsDir() {
+		node.Type = "directory"
+
+		if depth < maxDepth {
+			entries, err := os.ReadDir(absPath)
+			if err == nil {
+				for _, entry := range entries {
+					// Skip hidden files/dirs
+					if strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".pal" {
+						continue
+					}
+
+					childPath := filepath.Join(absPath, entry.Name())
+					childRelPath := filepath.Join(relPath, entry.Name())
+
+					child := s.buildDocumentTree(childPath, childRelPath, depth+1, maxDepth)
+					if child != nil {
+						node.Children = append(node.Children, child)
+					}
+				}
+			}
+		}
+	} else {
+		node.Type = "file"
+
+		// Determine doc type based on extension and path
+		ext := strings.ToLower(filepath.Ext(absPath))
+		switch ext {
+		case ".md":
+			if strings.Contains(relPath, "ports") {
+				node.DocType = "port"
+			} else if strings.Contains(relPath, "conventions") {
+				node.DocType = "convention"
+			} else if strings.Contains(relPath, "docs") {
+				node.DocType = "docs"
+			} else if strings.Contains(relPath, "decisions") {
+				node.DocType = "adr"
+			} else if strings.Contains(relPath, "sessions") {
+				node.DocType = "session"
+			} else {
+				node.DocType = "markdown"
+			}
+		case ".yaml", ".yml":
+			if strings.Contains(relPath, "agents") {
+				node.DocType = "agent"
+			} else {
+				node.DocType = "yaml"
+			}
+		default:
+			node.DocType = "other"
+		}
+	}
+
+	return node
+}
+
+// ========================================
+// Global Agent Handlers
+// ========================================
+
+func (s *Server) handleGlobalAgents(w http.ResponseWriter, r *http.Request) {
+	globalPath := config.GlobalDir()
+	store := agent.NewGlobalAgentStore(globalPath)
+
+	switch r.Method {
+	case "GET":
+		// List global agents
+		agentType := r.URL.Query().Get("type") // agents, skills, conventions
+
+		var result interface{}
+		var err error
+
+		switch agentType {
+		case "skills":
+			result, err = store.ListSkills()
+		case "conventions":
+			result, err = store.ListConventions()
+		default:
+			result, err = store.List()
+		}
+
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		s.jsonResponse(w, result)
+
+	case "POST":
+		// Handle actions
+		action := r.URL.Query().Get("action")
+
+		switch action {
+		case "init":
+			force := r.URL.Query().Get("force") == "true"
+			if err := store.Initialize(force); err != nil {
+				s.errorResponse(w, 500, err.Error())
+				return
+			}
+			s.jsonResponse(w, map[string]string{"status": "initialized"})
+
+		case "sync":
+			var req struct {
+				ProjectRoot    string `json:"project_root"`
+				ForceOverwrite bool   `json:"force_overwrite"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				s.errorResponse(w, 400, "Invalid request body")
+				return
+			}
+
+			if req.ProjectRoot == "" {
+				req.ProjectRoot = s.config.ProjectRoot
+			}
+
+			count, err := store.SyncToProject(req.ProjectRoot, req.ForceOverwrite)
+			if err != nil {
+				s.errorResponse(w, 500, err.Error())
+				return
+			}
+			s.jsonResponse(w, map[string]interface{}{
+				"status": "synced",
+				"count":  count,
+			})
+
+		case "reset":
+			if err := store.Initialize(true); err != nil {
+				s.errorResponse(w, 500, err.Error())
+				return
+			}
+			s.jsonResponse(w, map[string]string{"status": "reset"})
+
+		default:
+			s.errorResponse(w, 400, "Unknown action. Use: init, sync, reset")
+		}
+
+	default:
+		s.errorResponse(w, 405, "Method not allowed")
+	}
+}
+
+func (s *Server) handleGlobalAgentDetail(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v2/agents/global/")
+	if path == "" {
+		s.errorResponse(w, 400, "Path required")
+		return
+	}
+
+	// Check for special endpoints
+	if path == "manifest" {
+		s.handleGlobalManifest(w, r)
+		return
+	}
+	if path == "path" {
+		s.jsonResponse(w, map[string]string{"path": config.GlobalDir()})
+		return
+	}
+
+	globalPath := config.GlobalDir()
+	store := agent.NewGlobalAgentStore(globalPath)
+
+	switch r.Method {
+	case "GET":
+		content, err := store.Read(path)
+		if err != nil {
+			s.errorResponse(w, 404, err.Error())
+			return
+		}
+
+		// Return with metadata
+		s.jsonResponse(w, map[string]interface{}{
+			"path":    path,
+			"content": string(content),
+		})
+
+	case "PUT":
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.errorResponse(w, 400, "Invalid request body")
+			return
+		}
+
+		if err := store.Write(path, []byte(req.Content)); err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		s.jsonResponse(w, map[string]string{"status": "updated"})
+
+	case "DELETE":
+		if err := store.Delete(path); err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		s.jsonResponse(w, map[string]string{"status": "deleted"})
+
+	default:
+		s.errorResponse(w, 405, "Method not allowed")
+	}
+}
+
+func (s *Server) handleGlobalManifest(w http.ResponseWriter, r *http.Request) {
+	globalPath := config.GlobalDir()
+	store := agent.NewGlobalAgentStore(globalPath)
+
+	manifest, err := store.GetManifest()
+	if err != nil {
+		s.errorResponse(w, 404, err.Error())
+		return
+	}
+	s.jsonResponse(w, manifest)
 }
 
 // handleSystemAgentDetail handles requests for system agent details

@@ -477,3 +477,214 @@ export function useDocuments() {
 
   return { documents, stats, loading, indexing, fetchDocuments, fetchStats, getDocument, getContent, reindex }
 }
+
+// ============================================
+// Global Agents
+// ============================================
+
+export interface GlobalAgentInfo {
+  path: string
+  name: string
+  type: string
+  category: string
+  description?: string
+  has_rules: boolean
+  modified_at: string
+  size: number
+}
+
+export interface GlobalManifest {
+  version: string
+  initialized_at: string
+  last_updated: string
+  embedded_hash?: string
+  custom_agents?: string[]
+  overrides?: Record<string, string>
+}
+
+export function useGlobalAgents() {
+  const [agents, setAgents] = useState<GlobalAgentInfo[]>([])
+  const [skills, setSkills] = useState<GlobalAgentInfo[]>([])
+  const [conventions, setConventions] = useState<GlobalAgentInfo[]>([])
+  const [manifest, setManifest] = useState<GlobalManifest | null>(null)
+  const [globalPath, setGlobalPath] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+
+  const fetchAgents = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [agentsRes, skillsRes, conventionsRes] = await Promise.all([
+        apiRequest<GlobalAgentInfo[]>('/agents/global'),
+        apiRequest<GlobalAgentInfo[]>('/agents/global?type=skills'),
+        apiRequest<GlobalAgentInfo[]>('/agents/global?type=conventions'),
+      ])
+      setAgents(ensureArray(agentsRes.data))
+      setSkills(ensureArray(skillsRes.data))
+      setConventions(ensureArray(conventionsRes.data))
+    } catch {
+      setAgents([])
+      setSkills([])
+      setConventions([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const fetchManifest = useCallback(async () => {
+    try {
+      const res = await apiRequest<GlobalManifest>('/agents/global/manifest')
+      setManifest(res.data)
+    } catch {
+      setManifest(null)
+    }
+  }, [])
+
+  const fetchGlobalPath = useCallback(async () => {
+    try {
+      const res = await apiRequest<{ path: string }>('/agents/global/path')
+      setGlobalPath(res.data?.path || '')
+    } catch {
+      setGlobalPath('')
+    }
+  }, [])
+
+  const getContent = useCallback(async (path: string): Promise<string | null> => {
+    try {
+      const res = await apiRequest<{ path: string; content: string }>(`/agents/global/${path}`)
+      return res.data?.content || null
+    } catch {
+      return null
+    }
+  }, [])
+
+  const updateContent = useCallback(async (path: string, content: string): Promise<boolean> => {
+    try {
+      const res = await apiRequest(`/agents/global/${path}`, {
+        method: 'PUT',
+        body: { content },
+      })
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [])
+
+  const initialize = useCallback(async (force = false): Promise<boolean> => {
+    try {
+      const res = await apiRequest(`/agents/global?action=init${force ? '&force=true' : ''}`, {
+        method: 'POST',
+      })
+      if (!res.error) {
+        await fetchAgents()
+        await fetchManifest()
+      }
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [fetchAgents, fetchManifest])
+
+  const syncToProject = useCallback(async (projectRoot?: string, forceOverwrite = false): Promise<{ count: number } | null> => {
+    setSyncing(true)
+    try {
+      const res = await apiRequest<{ status: string; count: number }>('/agents/global?action=sync', {
+        method: 'POST',
+        body: { project_root: projectRoot, force_overwrite: forceOverwrite },
+      })
+      return res.data ? { count: res.data.count } : null
+    } catch {
+      return null
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
+  const reset = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await apiRequest('/agents/global?action=reset', { method: 'POST' })
+      if (!res.error) {
+        await fetchAgents()
+        await fetchManifest()
+      }
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [fetchAgents, fetchManifest])
+
+  useEffect(() => {
+    fetchAgents()
+    fetchManifest()
+    fetchGlobalPath()
+  }, [fetchAgents, fetchManifest, fetchGlobalPath])
+
+  return {
+    agents,
+    skills,
+    conventions,
+    manifest,
+    globalPath,
+    loading,
+    syncing,
+    fetchAgents,
+    fetchManifest,
+    getContent,
+    updateContent,
+    initialize,
+    syncToProject,
+    reset,
+  }
+}
+
+// ============================================
+// Document Tree Hook
+// ============================================
+
+export interface DocumentTreeNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  doc_type?: string
+  children?: DocumentTreeNode[]
+}
+
+export function useDocumentTree(root: string = '.', depth: number = 3) {
+  const [tree, setTree] = useState<DocumentTreeNode | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchTree = useCallback(async (newRoot?: string, newDepth?: number) => {
+    const targetRoot = newRoot ?? root
+    const targetDepth = newDepth ?? depth
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const params = new URLSearchParams({
+        root: targetRoot,
+        depth: String(targetDepth),
+      })
+      const res = await apiRequest(`/documents/tree?${params}`)
+
+      if (res.error) {
+        setError(res.error)
+        setTree(null)
+      } else {
+        setTree(res as DocumentTreeNode)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch tree')
+      setTree(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [root, depth])
+
+  useEffect(() => {
+    fetchTree()
+  }, [fetchTree])
+
+  return { tree, loading, error, fetchTree }
+}
