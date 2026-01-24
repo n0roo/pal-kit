@@ -239,6 +239,17 @@ func createSettingsJSON(path string) error {
 					},
 				},
 			},
+			"Notification": []map[string]interface{}{
+				{
+					"matcher": "",
+					"hooks": []map[string]interface{}{
+						{
+							"type":    "command",
+							"command": "pal hook notification",
+						},
+					},
+				},
+			},
 			"Stop": []map[string]interface{}{
 				{
 					"matcher": "",

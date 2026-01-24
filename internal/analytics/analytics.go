@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/duckdb/duckdb-go/v2"
+	"github.com/marcboeker/go-duckdb/v2"
 )
 
 // AnalyticsDB wraps DuckDB for analytics queries

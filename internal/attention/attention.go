@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/n0roo/pal-kit/internal/server/events"
 )
 
 // SessionAttention represents the attention state of a session
@@ -122,7 +123,26 @@ func (s *Store) UpdateTokens(sessionID string, loadedTokens int) error {
 			updated_at = ?
 		WHERE session_id = ?
 	`, loadedTokens, time.Now(), sessionID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 토큰 사용량 기반 SSE 이벤트 발행 (LM-sse-stream)
+	att, err := s.Get(sessionID)
+	if err == nil && att != nil {
+		usagePercent := att.GetTokenUsagePercent()
+		publisher := events.GetPublisher()
+
+		if usagePercent >= 90 {
+			// Critical: 90% 이상
+			publisher.PublishAttentionCritical(sessionID, usagePercent, loadedTokens, att.AvailableTokens)
+		} else if usagePercent >= 80 {
+			// Warning: 80% 이상
+			publisher.PublishAttentionWarning(sessionID, usagePercent, loadedTokens, att.AvailableTokens)
+		}
+	}
+
+	return nil
 }
 
 // UpdateFocusScore updates the focus score for a session
@@ -194,6 +214,10 @@ func (s *Store) RecordCompact(event *CompactEvent) error {
 			updated_at = ?
 		WHERE session_id = ?
 	`, event.AfterTokens, now, now, event.SessionID)
+
+	// SSE 이벤트 발행 (LM-sse-stream)
+	publisher := events.GetPublisher()
+	publisher.PublishCompactTriggered(event.SessionID, event.TriggerReason, event.CheckpointBefore, event.RecoveryHint)
 
 	return nil
 }

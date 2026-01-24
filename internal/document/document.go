@@ -800,5 +800,125 @@ func CleanQueryString(query string) string {
 	return result
 }
 
+// WriteDocumentContent writes content to a document file
+func WriteDocumentContent(projectRoot, docPath, content string) error {
+	fullPath := filepath.Join(projectRoot, docPath)
+	
+	// Ensure directory exists
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	
+	return os.WriteFile(fullPath, []byte(content), 0644)
+}
+
+// CreateDocument creates a new document file
+func (s *Service) CreateDocument(path, content string) error {
+	fullPath := filepath.Join(s.projectRoot, path)
+	
+	// Check if file already exists
+	if _, err := os.Stat(fullPath); err == nil {
+		return fmt.Errorf("document already exists: %s", path)
+	}
+	
+	// Ensure directory exists
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	
+	// Write file
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		return err
+	}
+	
+	// Index the new document
+	return s.Refresh(path)
+}
+
+// UpdateDocument updates an existing document's content
+func (s *Service) UpdateDocument(id, content string) error {
+	doc, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	
+	fullPath := filepath.Join(s.projectRoot, doc.Path)
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		return err
+	}
+	
+	// Re-index
+	return s.Refresh(doc.Path)
+}
+
+// MoveDocument moves/renames a document
+func (s *Service) MoveDocument(id, newPath string) error {
+	doc, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	
+	oldFullPath := filepath.Join(s.projectRoot, doc.Path)
+	newFullPath := filepath.Join(s.projectRoot, newPath)
+	
+	// Ensure target directory exists
+	dir := filepath.Dir(newFullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	
+	// Move file
+	if err := os.Rename(oldFullPath, newFullPath); err != nil {
+		return err
+	}
+	
+	// Delete old index entry
+	_, err = s.db.Exec(`DELETE FROM documents WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	
+	// Index at new location
+	return s.Refresh(newPath)
+}
+
+// CopyDocument copies a document to a new location
+func (s *Service) CopyDocument(id, newPath string) error {
+	doc, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	
+	// Read original content
+	content, err := s.GetContent(id)
+	if err != nil {
+		return err
+	}
+	
+	// Create at new location
+	return s.CreateDocument(newPath, content)
+}
+
+// DeleteDocument deletes a document
+func (s *Service) DeleteDocument(id string) error {
+	doc, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	
+	fullPath := filepath.Join(s.projectRoot, doc.Path)
+	
+	// Delete file
+	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	
+	// Delete from index
+	_, err = s.db.Exec(`DELETE FROM documents WHERE id = ?`, id)
+	return err
+}
+
 // unused but keeping io import for potential future use
 var _ = io.EOF

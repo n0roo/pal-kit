@@ -32,6 +32,13 @@ const (
 	SubtypeTestFail     MessageSubtype = "test_fail"
 	SubtypeFixRequest   MessageSubtype = "fix_request"
 	SubtypeProgress     MessageSubtype = "progress"
+
+	// Review message subtypes (L2-agent-reviewer)
+	SubtypeReviewRequest  MessageSubtype = "review_request"
+	SubtypeReviewApproved MessageSubtype = "review_approved"
+	SubtypeReviewRejected MessageSubtype = "review_rejected"
+	SubtypeReviewConditional MessageSubtype = "review_conditional"
+	SubtypeReviewFeedback MessageSubtype = "review_feedback"
 )
 
 // MessageStatus defines the status of a message
@@ -100,6 +107,37 @@ type TestResultPayload struct {
 type FixRequestPayload struct {
 	Failures    []string `json:"failures"`
 	Suggestions []string `json:"suggestions,omitempty"`
+}
+
+// ReviewRequestPayload is the payload for review requests (Worker -> Reviewer)
+type ReviewRequestPayload struct {
+	PortID       string   `json:"port_id"`
+	ChangedFiles []string `json:"changed_files"`
+	BuildStatus  string   `json:"build_status"` // success, failed
+	TestResults  string   `json:"test_results"` // passed, failed, skipped
+	Context      string   `json:"context,omitempty"`
+}
+
+// ReviewFeedbackItem represents a single feedback item
+type ReviewFeedbackItem struct {
+	Severity   string `json:"severity"`   // critical, major, minor
+	Category   string `json:"category"`   // quality, convention, security, performance
+	File       string `json:"file"`
+	Line       int    `json:"line,omitempty"`
+	Message    string `json:"message"`
+	Suggestion string `json:"suggestion,omitempty"`
+	Required   bool   `json:"required"` // true = 필수, false = 권장
+}
+
+// ReviewResultPayload is the payload for review results (Reviewer -> Worker/Builder)
+type ReviewResultPayload struct {
+	PortID    string               `json:"port_id"`
+	Status    string               `json:"status"` // approved, conditional, rejected
+	Summary   string               `json:"summary"`
+	Positives []string             `json:"positives,omitempty"` // 긍정적 피드백
+	Feedback  []ReviewFeedbackItem `json:"feedback,omitempty"`
+	Security  []string             `json:"security_issues,omitempty"`
+	Perf      []string             `json:"performance_issues,omitempty"`
 }
 
 // Store handles message persistence
@@ -357,6 +395,48 @@ func (s *Store) SendFixRequest(fromSession, toSession, portID string, payload Fi
 		ToSession:      toSession,
 		Type:           TypeRequest,
 		Subtype:        SubtypeFixRequest,
+		Payload:        payload,
+		PortID:         portID,
+		Priority:       2,
+	}
+	return s.Send(msg)
+}
+
+// SendReviewRequest sends a review request message (Worker -> Reviewer)
+func (s *Store) SendReviewRequest(fromSession, toSession, portID string, payload ReviewRequestPayload) error {
+	msg := &Message{
+		ConversationID: portID,
+		FromSession:    fromSession,
+		ToSession:      toSession,
+		Type:           TypeRequest,
+		Subtype:        SubtypeReviewRequest,
+		Payload:        payload,
+		PortID:         portID,
+		Priority:       2,
+	}
+	return s.Send(msg)
+}
+
+// SendReviewResult sends a review result message (Reviewer -> Worker/Builder)
+func (s *Store) SendReviewResult(fromSession, toSession, portID string, payload ReviewResultPayload) error {
+	var subtype MessageSubtype
+	switch payload.Status {
+	case "approved":
+		subtype = SubtypeReviewApproved
+	case "rejected":
+		subtype = SubtypeReviewRejected
+	case "conditional":
+		subtype = SubtypeReviewConditional
+	default:
+		subtype = SubtypeReviewFeedback
+	}
+
+	msg := &Message{
+		ConversationID: portID,
+		FromSession:    fromSession,
+		ToSession:      toSession,
+		Type:           TypeResponse,
+		Subtype:        subtype,
 		Payload:        payload,
 		PortID:         portID,
 		Priority:       2,

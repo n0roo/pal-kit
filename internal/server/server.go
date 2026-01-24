@@ -84,6 +84,17 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/ports/flow", s.withCORS(s.handlePortFlow))
 	mux.HandleFunc("/api/ports/progress", s.withCORS(s.handlePortProgress))
 
+	// v2 API routes
+	s.RegisterV2Routes(mux)
+
+	// SSE (Server-Sent Events) for real-time updates
+	sseHub := NewSSEHub()
+	go sseHub.Run()
+	s.RegisterSSERoutes(mux, sseHub)
+
+	// v2 Status endpoint
+	mux.HandleFunc("/api/v2/status", s.withCORS(s.handleV2Status))
+
 	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -91,14 +102,19 @@ func (s *Server) Start() error {
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
+	// Wrap entire mux with CORS middleware
+	corsHandler := s.corsMiddleware(mux)
+
 	s.srv = &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.config.Port),
-		Handler:      mux,
+		Handler:      corsHandler,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second, // Increased for SSE
 	}
 
 	log.Printf("🚀 PAL Kit Dashboard running at http://localhost:%d", s.config.Port)
+	log.Printf("📡 v2 API available at /api/v2/*")
+	log.Printf("🔔 SSE events at /api/v2/events")
 	return s.srv.ListenAndServe()
 }
 
@@ -109,13 +125,30 @@ func (s *Server) Stop() error {
 	return s.srv.Shutdown(ctx)
 }
 
-// withCORS adds CORS headers
-func (s *Server) withCORS(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+// corsMiddleware wraps a handler with CORS headers for all requests
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers for all requests
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Max-Age", "86400")
 
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withCORS adds CORS headers (kept for compatibility, but corsMiddleware handles it globally)
+func (s *Server) withCORS(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// CORS headers are now set by global middleware
+		// Just handle OPTIONS for safety
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return

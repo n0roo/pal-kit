@@ -1,0 +1,37 @@
+# {{ .ProjectName }}
+
+> {{ .Description }}
+
+## ✨ 주요 기능
+
+{{ range .Features }}
+- **{{ .Name }}**: {{ .Description }}
+{{ end }}
+
+## 📦 설치
+
+```bash
+{{ .InstallCommand }}
+```
+
+## 🚀 빠른 시작
+
+```{{ .CodeLanguage }}
+{{ .QuickStartCode }}
+```
+
+## 📚 문서
+
+- [API 문서](./docs/api.md)
+- [사용자 가이드](./docs/guide.md)
+{{ if .Examples }}
+- [예제](./examples/)
+{{ end }}
+
+## 🤝 기여하기
+
+기여를 환영합니다! [CONTRIBUTING.md](./CONTRIBUTING.md)를 참조해주세요.
+
+## 📝 라이선스
+
+{{ .License }}

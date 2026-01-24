@@ -132,7 +132,7 @@ func (s *Service) GetHierarchical(id string) (*HierarchicalSession, error) {
 		SELECT id, port_id, title, status, started_at, ended_at, jsonl_path,
 		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
 		       cost_usd, compact_count, last_compact_at,
-		       parent_id, root_id, depth, path, type,
+		       parent_id, root_id, COALESCE(depth, 0), COALESCE(path, ''), COALESCE(type, 'single'),
 		       agent_id, agent_version, substatus, attention_score,
 		       token_budget, context_snapshot, checkpoint_id, output_summary,
 		       claude_session_id, project_root, project_name, transcript_path, cwd
@@ -212,7 +212,7 @@ func (s *Service) ListByRoot(rootID string) ([]*HierarchicalSession, error) {
 		SELECT id, port_id, title, status, started_at, ended_at, jsonl_path,
 		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
 		       cost_usd, compact_count, last_compact_at,
-		       parent_id, root_id, depth, path, type,
+		       parent_id, root_id, COALESCE(depth, 0), COALESCE(path, ''), COALESCE(type, 'single'),
 		       agent_id, agent_version, substatus, attention_score,
 		       token_budget, context_snapshot, checkpoint_id, output_summary,
 		       claude_session_id, project_root, project_name, transcript_path, cwd
@@ -234,7 +234,7 @@ func (s *Service) ListByType(sessionType string, activeOnly bool, limit int) ([]
 		SELECT id, port_id, title, status, started_at, ended_at, jsonl_path,
 		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
 		       cost_usd, compact_count, last_compact_at,
-		       parent_id, root_id, depth, path, type,
+		       parent_id, root_id, COALESCE(depth, 0), COALESCE(path, ''), COALESCE(type, 'single'),
 		       agent_id, agent_version, substatus, attention_score,
 		       token_budget, context_snapshot, checkpoint_id, output_summary,
 		       claude_session_id, project_root, project_name, transcript_path, cwd
@@ -324,6 +324,38 @@ func (s *Service) UpdateOutputSummary(id string, summary interface{}) error {
 // GetBuildSessions returns all build-type sessions
 func (s *Service) GetBuildSessions(activeOnly bool, limit int) ([]*HierarchicalSession, error) {
 	return s.ListByType(TypeBuild, activeOnly, limit)
+}
+
+// GetRootHierarchicalSessions returns all root-level sessions (build type OR no parent) with hierarchy info
+func (s *Service) GetRootHierarchicalSessions(activeOnly bool, limit int) ([]*HierarchicalSession, error) {
+	query := `
+		SELECT id, port_id, title, status, started_at, ended_at, jsonl_path,
+		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		       cost_usd, compact_count, last_compact_at,
+		       parent_id, root_id, COALESCE(depth, 0), COALESCE(path, ''), COALESCE(type, 'single'),
+		       agent_id, agent_version, substatus, attention_score,
+		       token_budget, context_snapshot, checkpoint_id, output_summary,
+		       claude_session_id, project_root, project_name, transcript_path, cwd
+		FROM sessions 
+		WHERE (type = 'build' OR parent_id IS NULL OR parent_id = '')
+	`
+
+	if activeOnly {
+		query += " AND status = 'running'"
+	}
+	query += " ORDER BY started_at DESC"
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanHierarchicalSessions(rows)
 }
 
 // GetHierarchyStats returns statistics for a session hierarchy

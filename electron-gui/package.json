@@ -1,0 +1,70 @@
+{
+  "name": "pal-kit-gui",
+  "version": "1.0.0",
+  "description": "PAL Kit - Personal Agentic Layer GUI",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0",
+    "lucide-react": "^0.294.0",
+    "clsx": "^2.0.0",
+    "date-fns": "^2.30.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@testing-library/react": "^14.1.0",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.16",
+    "electron": "^27.1.0",
+    "electron-builder": "^24.9.1",
+    "jsdom": "^23.0.1",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.5",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.0",
+    "vite-plugin-electron": "^0.15.4",
+    "vitest": "^1.0.0"
+  },
+  "build": {
+    "appId": "com.pal-kit.gui",
+    "productName": "PAL Kit",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../pal",
+        "to": "pal"
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
+  }
+}
