@@ -2,17 +2,18 @@ package analytics
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/marcboeker/go-duckdb/v2"
+	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
 // AnalyticsDB wraps DuckDB for analytics queries
 type AnalyticsDB struct {
-	conn *duckdb.Conn
+	db   *sql.DB
 	path string
 }
 
@@ -83,21 +84,21 @@ func New(cfg Config) (*AnalyticsDB, error) {
 		}
 	}
 
-	// DuckDB 연결
-	conn, err := duckdb.NewConn(cfg.DBPath, nil)
+	// DuckDB 연결 (database/sql 인터페이스)
+	db, err := sql.Open("duckdb", cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("DuckDB 열기 실패: %w", err)
 	}
 
 	return &AnalyticsDB{
-		conn: conn,
+		db:   db,
 		path: cfg.DBPath,
 	}, nil
 }
 
 // Close closes the database connection
 func (a *AnalyticsDB) Close() error {
-	return a.conn.Close()
+	return a.db.Close()
 }
 
 // SearchDocs searches documents using DuckDB's JSON query capabilities
@@ -111,7 +112,7 @@ func (a *AnalyticsDB) SearchDocs(ctx context.Context, indexPath, query string) (
 		LIMIT 50
 	`, indexPath, query, query)
 
-	rows, err := a.conn.Query(ctx, sqlQuery)
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("문서 검색 실패: %w", err)
 	}
@@ -141,7 +142,7 @@ func (a *AnalyticsDB) GetDocsIndex(ctx context.Context, indexPath string) ([]Doc
 		ORDER BY path
 	`, indexPath)
 
-	rows, err := a.conn.Query(ctx, sqlQuery)
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("문서 인덱스 로드 실패: %w", err)
 	}
@@ -172,7 +173,7 @@ func (a *AnalyticsDB) FindConventions(ctx context.Context, indexPath, pattern st
 		ORDER BY priority, name
 	`, indexPath, pattern)
 
-	rows, err := a.conn.Query(ctx, sqlQuery)
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("컨벤션 검색 실패: %w", err)
 	}
@@ -206,7 +207,7 @@ func (a *AnalyticsDB) GetTokenStats(ctx context.Context, historyPath, sessionID 
 		WHERE session_id = '%s'
 	`, historyPath, sessionID)
 
-	rows, err := a.conn.Query(ctx, sqlQuery)
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("토큰 통계 조회 실패: %w", err)
 	}
@@ -236,7 +237,7 @@ func (a *AnalyticsDB) GetTokenTrend(ctx context.Context, historyPath string, day
 		ORDER BY 1
 	`, historyPath, days)
 
-	rows, err := a.conn.Query(ctx, sqlQuery)
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("토큰 추이 조회 실패: %w", err)
 	}
@@ -269,7 +270,7 @@ func (a *AnalyticsDB) AgentVersionStats(ctx context.Context, historyPath, agentI
 		ORDER BY agent_version DESC
 	`, historyPath, agentID)
 
-	rows, err := a.conn.Query(ctx, sqlQuery)
+	rows, err := a.db.QueryContext(ctx, sqlQuery)
 	if err != nil {
 		return nil, fmt.Errorf("에이전트 버전 통계 조회 실패: %w", err)
 	}
@@ -290,7 +291,7 @@ func (a *AnalyticsDB) AgentVersionStats(ctx context.Context, historyPath, agentI
 // ExportToParquet exports query result to parquet format
 func (a *AnalyticsDB) ExportToParquet(ctx context.Context, query, outputPath string) error {
 	exportQuery := fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", query, outputPath)
-	_, err := a.conn.Exec(ctx, exportQuery)
+	_, err := a.db.ExecContext(ctx, exportQuery)
 	if err != nil {
 		return fmt.Errorf("Parquet 내보내기 실패: %w", err)
 	}
@@ -304,14 +305,17 @@ func (a *AnalyticsDB) QueryJSON(ctx context.Context, jsonPath, whereClause strin
 		fullQuery += " WHERE " + whereClause
 	}
 
-	rows, err := a.conn.Query(ctx, fullQuery)
+	rows, err := a.db.QueryContext(ctx, fullQuery)
 	if err != nil {
 		return nil, fmt.Errorf("JSON 쿼리 실패: %w", err)
 	}
 	defer rows.Close()
 
 	// Get column names
-	colTypes := rows.ColumnTypes()
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("컬럼 타입 조회 실패: %w", err)
+	}
 	cols := make([]string, len(colTypes))
 	for i, ct := range colTypes {
 		cols[i] = ct.Name()
@@ -341,6 +345,6 @@ func (a *AnalyticsDB) QueryJSON(ctx context.Context, jsonPath, whereClause strin
 
 // Exec executes a SQL statement
 func (a *AnalyticsDB) Exec(ctx context.Context, query string) error {
-	_, err := a.conn.Exec(ctx, query)
+	_, err := a.db.ExecContext(ctx, query)
 	return err
 }
