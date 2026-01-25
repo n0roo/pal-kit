@@ -1,7 +1,9 @@
 package session
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -31,7 +33,7 @@ const (
 	EventUserRequest = "user_request" // 사용자 요구사항 입력
 
 	// 파일 이벤트
-	EventFileEdit     = "file_edit"     // 파일 수정 (추적됨)
+	EventFileEdit      = "file_edit"      // 파일 수정 (추적됨)
 	EventUntrackedEdit = "untracked_edit" // 파일 수정 (추적 안됨)
 
 	// 의사결정 이벤트
@@ -39,8 +41,25 @@ const (
 	EventEscalation = "escalation" // 에스컬레이션 발생
 
 	// 시스템 이벤트
-	EventCompact      = "compact"       // 컨텍스트 컴팩트
+	EventCompact       = "compact"        // 컨텍스트 컴팩트
 	EventZombieCleanup = "zombie_cleanup" // 좀비 세션 정리
+
+	// v11: 컨텍스트 이벤트
+	EventContextLoaded   = "context_loaded"   // 컨텍스트 로드 완료
+	EventContextOverflow = "context_overflow" // 토큰 예산 초과
+
+	// v11: 에이전트 이벤트
+	EventAgentActivated   = "agent_activated"   // 에이전트 활성화
+	EventAgentDeactivated = "agent_deactivated" // 에이전트 비활성화
+
+	// v11: 의존성 이벤트
+	EventDependencyResolved = "dependency_resolved" // 의존성 해결
+
+	// v11: 품질 이벤트
+	EventQualityWarning = "quality_warning" // 코드 품질 문제 감지
+
+	// v11: 체크포인트 이벤트
+	EventCheckpointCreated = "checkpoint_created" // 체크포인트 생성
 )
 
 // Session represents a work session
@@ -62,11 +81,15 @@ type Session struct {
 	CompactCount      int
 	LastCompactAt     sql.NullTime
 	// v3 필드
-	ClaudeSessionID   sql.NullString
-	ProjectRoot       sql.NullString
-	ProjectName       sql.NullString
-	TranscriptPath    sql.NullString
-	Cwd               sql.NullString
+	ClaudeSessionID sql.NullString
+	ProjectRoot     sql.NullString
+	ProjectName     sql.NullString
+	TranscriptPath  sql.NullString
+	Cwd             sql.NullString
+	// v11 필드 - 세션 식별 강화
+	TTY         sql.NullString
+	ParentPID   sql.NullInt64
+	Fingerprint sql.NullString
 }
 
 // SessionEvent represents a session event for history tracking
@@ -111,6 +134,37 @@ type StartOptions struct {
 	ProjectName     string
 	TranscriptPath  string
 	Cwd             string
+	// v11 필드 - 세션 식별 강화
+	TTY       string
+	ParentPID int
+}
+
+// SessionIdentifier contains fields for unique session identification
+type SessionIdentifier struct {
+	CWD         string    `json:"cwd"`
+	TTY         string    `json:"tty"`
+	ParentPID   int       `json:"parent_pid"`
+	StartTime   time.Time `json:"start_time"`
+	Fingerprint string    `json:"fingerprint"`
+}
+
+// GenerateFingerprint creates a unique fingerprint from session identifier fields
+func GenerateFingerprint(cwd, tty string, parentPID int, startTime time.Time) string {
+	data := fmt.Sprintf("%s:%s:%d:%d", cwd, tty, parentPID, startTime.Unix())
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])[:16] // 첫 16자만 사용
+}
+
+// NewSessionIdentifier creates a SessionIdentifier with auto-generated fingerprint
+func NewSessionIdentifier(cwd, tty string, parentPID int) *SessionIdentifier {
+	now := time.Now()
+	return &SessionIdentifier{
+		CWD:         cwd,
+		TTY:         tty,
+		ParentPID:   parentPID,
+		StartTime:   now,
+		Fingerprint: GenerateFingerprint(cwd, tty, parentPID, now),
+	}
 }
 
 // StartWithOptions creates a new session with type and parent
@@ -128,6 +182,8 @@ func (s *Service) StartWithOptions(id, portID, title, sessionType, parentSession
 func (s *Service) StartWithFullOptions(opts StartOptions) error {
 	var portIDNull, titleNull, parentNull sql.NullString
 	var claudeIDNull, projRootNull, projNameNull, transcriptNull, cwdNull sql.NullString
+	var ttyNull, fingerprintNull sql.NullString
+	var parentPIDNull sql.NullInt64
 
 	if opts.PortID != "" {
 		// 포트 존재 여부 확인 (없으면 NULL로 처리)
@@ -166,20 +222,33 @@ func (s *Service) StartWithFullOptions(opts StartOptions) error {
 	if opts.Cwd != "" {
 		cwdNull = sql.NullString{String: opts.Cwd, Valid: true}
 	}
+	// v11 세션 식별 강화 필드
+	if opts.TTY != "" {
+		ttyNull = sql.NullString{String: opts.TTY, Valid: true}
+	}
+	if opts.ParentPID > 0 {
+		parentPIDNull = sql.NullInt64{Int64: int64(opts.ParentPID), Valid: true}
+	}
+	// fingerprint 자동 생성
+	fingerprint := GenerateFingerprint(opts.Cwd, opts.TTY, opts.ParentPID, time.Now())
+	fingerprintNull = sql.NullString{String: fingerprint, Valid: true}
 
 	_, err := s.db.Exec(`
 		INSERT INTO sessions (id, port_id, title, status, session_type, parent_session,
-			claude_session_id, project_root, project_name, transcript_path, cwd)
-		VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
+			claude_session_id, project_root, project_name, transcript_path, cwd,
+			tty, parent_pid, fingerprint)
+		VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, opts.ID, portIDNull, titleNull, opts.SessionType, parentNull,
-		claudeIDNull, projRootNull, projNameNull, transcriptNull, cwdNull)
+		claudeIDNull, projRootNull, projNameNull, transcriptNull, cwdNull,
+		ttyNull, parentPIDNull, fingerprintNull)
 
 	if err != nil {
 		return fmt.Errorf("세션 생성 실패: %w", err)
 	}
 
 	// 세션 시작 이벤트 로깅
-	s.LogEvent(opts.ID, "session_start", fmt.Sprintf(`{"claude_session_id":"%s","project":"%s"}`, opts.ClaudeSessionID, opts.ProjectName))
+	s.LogEvent(opts.ID, "session_start", fmt.Sprintf(`{"claude_session_id":"%s","project":"%s","fingerprint":"%s"}`,
+		opts.ClaudeSessionID, opts.ProjectName, fingerprint))
 
 	return nil
 }
@@ -364,7 +433,7 @@ func (s *Service) FindByClaudeSessionID(claudeSessionID string) (*Session, error
 // 2. Try by cwd + project_root (if provided)
 // 3. Fall back to most recent running session
 func (s *Service) FindActiveSession(claudeSessionID, cwd, projectRoot string) (*Session, error) {
-	// Strategy 1: Claude session ID
+	// Strategy 1: Claude session ID (가장 정확)
 	if claudeSessionID != "" {
 		sess, err := s.FindByClaudeSessionID(claudeSessionID)
 		if err == nil && sess != nil {
@@ -387,6 +456,91 @@ func (s *Service) FindActiveSession(claudeSessionID, cwd, projectRoot string) (*
 	}
 
 	return nil, fmt.Errorf("활성 세션을 찾을 수 없습니다")
+}
+
+// FindActiveSessionWithIdentifier finds a session using SessionIdentifier for more accurate matching
+func (s *Service) FindActiveSessionWithIdentifier(claudeSessionID string, identifier *SessionIdentifier, projectRoot string) (*Session, error) {
+	// Strategy 1: Claude session ID
+	if claudeSessionID != "" {
+		sess, err := s.FindByClaudeSessionID(claudeSessionID)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	// Strategy 2: Fingerprint (가장 정확한 로컬 식별)
+	if identifier != nil && identifier.Fingerprint != "" {
+		sess, err := s.FindByFingerprint(identifier.Fingerprint)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	// Strategy 3: cwd + project_root 기반
+	cwd := ""
+	if identifier != nil {
+		cwd = identifier.CWD
+	}
+	if cwd != "" || projectRoot != "" {
+		sess, err := s.findByLocation(cwd, projectRoot)
+		if err == nil && sess != nil {
+			return sess, nil
+		}
+	}
+
+	// Strategy 4: 가장 최근 running 세션
+	sess, err := s.findMostRecentRunning()
+	if err == nil && sess != nil {
+		return sess, nil
+	}
+
+	return nil, fmt.Errorf("활성 세션을 찾을 수 없습니다")
+}
+
+// FindByFingerprint finds a running session by fingerprint
+func (s *Service) FindByFingerprint(fingerprint string) (*Session, error) {
+	var sess Session
+	var sessionType, parentSession sql.NullString
+
+	query := `
+		SELECT id, port_id, title, status,
+		       COALESCE(session_type, 'single'), parent_session,
+		       started_at, ended_at, jsonl_path,
+		       input_tokens, output_tokens, cache_read_tokens, cache_create_tokens,
+		       cost_usd, compact_count, last_compact_at,
+		       claude_session_id, project_root, project_name, transcript_path, cwd,
+		       tty, parent_pid, fingerprint
+		FROM sessions
+		WHERE status = 'running' AND fingerprint = ?
+		ORDER BY started_at DESC
+		LIMIT 1
+	`
+
+	err := s.db.QueryRow(query, fingerprint).Scan(
+		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+		&sessionType, &parentSession,
+		&sess.StartedAt, &sess.EndedAt,
+		&sess.JSONLPath, &sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+		&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount, &sess.LastCompactAt,
+		&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName, &sess.TranscriptPath, &sess.Cwd,
+		&sess.TTY, &sess.ParentPID, &sess.Fingerprint,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if sessionType.Valid {
+		sess.SessionType = sessionType.String
+	} else {
+		sess.SessionType = TypeSingle
+	}
+	sess.ParentSession = parentSession
+
+	return &sess, nil
 }
 
 // findByLocation finds a running session by cwd or project_root

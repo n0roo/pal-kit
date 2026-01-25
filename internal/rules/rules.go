@@ -241,3 +241,90 @@ func (s *Service) AppendToRule(portID, content string) error {
 
 	return nil
 }
+
+// v11: LoadConvention loads a convention file and creates a rule file
+func (s *Service) LoadConvention(conventionPath string) error {
+	if err := s.EnsureDir(); err != nil {
+		return err
+	}
+
+	// 파일 이름 추출
+	filename := filepath.Base(conventionPath)
+	name := strings.TrimSuffix(filename, filepath.Ext(filename))
+
+	// conv-{name}.md 로 저장
+	rulePath := filepath.Join(s.rulesDir, fmt.Sprintf("conv-%s.md", name))
+
+	content, err := os.ReadFile(conventionPath)
+	if err != nil {
+		return fmt.Errorf("convention 파일 읽기 실패: %w", err)
+	}
+
+	// 헤더 추가
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.WriteString("type: convention\n")
+	sb.WriteString(fmt.Sprintf("source: %s\n", conventionPath))
+	sb.WriteString(fmt.Sprintf("loaded: %s\n", time.Now().Format(time.RFC3339)))
+	sb.WriteString("---\n\n")
+	sb.WriteString(string(content))
+
+	if err := os.WriteFile(rulePath, []byte(sb.String()), 0644); err != nil {
+		return fmt.Errorf("convention rule 파일 생성 실패: %w", err)
+	}
+
+	return nil
+}
+
+// v11: UnloadConventions removes all convention rule files
+func (s *Service) UnloadConventions() error {
+	entries, err := os.ReadDir(s.rulesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "conv-") && strings.HasSuffix(entry.Name(), ".md") {
+			rulePath := filepath.Join(s.rulesDir, entry.Name())
+			os.Remove(rulePath)
+		}
+	}
+
+	return nil
+}
+
+// v11: GenerateDependencySummary generates a summary of port dependencies
+func (s *Service) GenerateDependencySummary(dependencies []string) string {
+	if len(dependencies) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## 의존성\n\n")
+	sb.WriteString("이 포트는 다음 포트에 의존합니다:\n\n")
+	for _, dep := range dependencies {
+		sb.WriteString(fmt.Sprintf("- `%s`\n", dep))
+	}
+	sb.WriteString("\n의존 포트가 완료된 후에 작업을 진행하세요.\n")
+
+	return sb.String()
+}
+
+// v11: WriteDependencyRule creates a dependencies.md rule file
+func (s *Service) WriteDependencyRule(dependencies []string) error {
+	if len(dependencies) == 0 {
+		return nil
+	}
+
+	if err := s.EnsureDir(); err != nil {
+		return err
+	}
+
+	rulePath := filepath.Join(s.rulesDir, "dependencies.md")
+	content := s.GenerateDependencySummary(dependencies)
+
+	return os.WriteFile(rulePath, []byte(content), 0644)
+}

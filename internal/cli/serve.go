@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/n0roo/pal-kit/internal/config"
@@ -12,6 +13,7 @@ import (
 )
 
 var servePort int
+var serveVaultPath string
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -26,6 +28,7 @@ var serveCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().IntVarP(&servePort, "port", "p", 8080, "서버 포트")
+	serveCmd.Flags().StringVar(&serveVaultPath, "vault", "", "Knowledge Base vault 경로 (기본: ~/mcp-docs)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -40,6 +43,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 프로젝트 루트 (현재 디렉토리 또는 감지된 프로젝트)
 	projectRoot := config.FindProjectRoot()
 
+	// Vault path 결정
+	vaultPath := serveVaultPath
+	if vaultPath == "" {
+		// 기본: ~/mcp-docs
+		home, _ := os.UserHomeDir()
+		vaultPath = filepath.Join(home, "mcp-docs")
+	}
+
 	// Handle graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -51,6 +62,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("📊 전역 DB: %s\n", dbPath)
 	fmt.Printf("📁 프로젝트: %s\n", projectRoot)
+	fmt.Printf("📚 KB Vault: %s\n", vaultPath)
 
-	return server.Run(servePort, projectRoot, dbPath)
+	return server.RunWithConfig(server.Config{
+		Port:        servePort,
+		ProjectRoot: projectRoot,
+		DBPath:      dbPath,
+		VaultPath:   vaultPath,
+	})
 }

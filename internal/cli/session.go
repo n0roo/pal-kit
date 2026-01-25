@@ -473,7 +473,7 @@ func runSessionTree(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 
-		printSessionTree(tree, "", true, true)
+		printLegacySessionTree(tree, "", true, true)
 	} else {
 		// 모든 루트 세션의 트리 출력
 		roots, err := svc.GetRootSessions(sessionLimit)
@@ -501,7 +501,7 @@ func runSessionTree(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				continue
 			}
-			printSessionTree(tree, "", i == len(roots)-1, true)
+			printLegacySessionTree(tree, "", i == len(roots)-1, true)
 			if i < len(roots)-1 {
 				fmt.Println()
 			}
@@ -511,7 +511,7 @@ func runSessionTree(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printSessionTree(node *session.SessionNode, prefix string, isLast bool, isRoot bool) {
+func printLegacySessionTree(node *session.SessionNode, prefix string, isLast bool, isRoot bool) {
 	typeEmoji := map[string]string{
 		"single":  "📍",
 		"multi":   "🔀",
@@ -568,7 +568,7 @@ func printSessionTree(node *session.SessionNode, prefix string, isLast bool, isR
 
 	// 하위 노드 출력
 	for i, child := range node.Children {
-		printSessionTree(&child, childPrefix, i == len(node.Children)-1, false)
+		printLegacySessionTree(&child, childPrefix, i == len(node.Children)-1, false)
 	}
 }
 

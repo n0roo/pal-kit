@@ -18,6 +18,15 @@ const (
 	WorkflowMulti     WorkflowType = "multi"
 )
 
+// PortTrackingMode represents the port tracking enforcement level
+type PortTrackingMode string
+
+const (
+	TrackingModeStrict PortTrackingMode = "strict" // 포트 없으면 block
+	TrackingModeWarn   PortTrackingMode = "warn"   // 경고만
+	TrackingModeOff    PortTrackingMode = "off"    // 추적 안 함
+)
+
 // ProjectConfig represents .pal/config.yaml
 type ProjectConfig struct {
 	Version  string          `yaml:"version"`
@@ -25,6 +34,37 @@ type ProjectConfig struct {
 	Workflow WorkflowConfig  `yaml:"workflow"`
 	Agents   AgentsConfig    `yaml:"agents"`
 	Settings ProjectSettings `yaml:"settings"`
+	Context  ContextConfig   `yaml:"context"` // v11: 컨텍스트 설정
+}
+
+// ContextConfig holds context management settings
+type ContextConfig struct {
+	// 총 토큰 예산
+	TokenBudget int `yaml:"token_budget"`
+
+	// 우선순위별 할당 (합계 100%)
+	Allocation ContextAllocation `yaml:"allocation"`
+
+	// 로딩 전략: priority | fifo | recent
+	Strategy string `yaml:"strategy"`
+
+	// 최소 보장 토큰
+	Minimum ContextMinimum `yaml:"minimum"`
+}
+
+// ContextAllocation holds token allocation percentages
+type ContextAllocation struct {
+	PortSpec      int `yaml:"port_spec"`      // 현재 작업 포트 명세
+	Conventions   int `yaml:"conventions"`    // 컨벤션/가이드
+	RecentChanges int `yaml:"recent_changes"` // 최근 변경 사항
+	RelatedDocs   int `yaml:"related_docs"`   // 관련 문서
+	SessionInfo   int `yaml:"session_info"`   // 세션 정보
+}
+
+// ContextMinimum holds minimum guaranteed tokens
+type ContextMinimum struct {
+	PortSpec    int `yaml:"port_spec"`
+	Conventions int `yaml:"conventions"`
 }
 
 // ProjectInfo holds project metadata
@@ -48,9 +88,13 @@ type AgentsConfig struct {
 
 // ProjectSettings holds project-level settings
 type ProjectSettings struct {
-	AutoPortCreate    bool `yaml:"auto_port_create"`
-	RequireUserReview bool `yaml:"require_user_review"`
+	AutoPortCreate     bool `yaml:"auto_port_create"`
+	RequireUserReview  bool `yaml:"require_user_review"`
 	AutoTestOnComplete bool `yaml:"auto_test_on_complete"`
+
+	// v11: 포트 추적 강제화
+	TrackingMode       PortTrackingMode `yaml:"tracking_mode"`       // strict, warn, off
+	TrackingAutoCreate bool             `yaml:"tracking_auto_create"` // 자동 포트 생성 제안
 }
 
 // DefaultProjectConfig returns a default config
@@ -69,9 +113,26 @@ func DefaultProjectConfig(projectName string) *ProjectConfig {
 			Testers: []string{},
 		},
 		Settings: ProjectSettings{
-			AutoPortCreate:    true,
-			RequireUserReview: true,
+			AutoPortCreate:     true,
+			RequireUserReview:  true,
 			AutoTestOnComplete: true,
+			TrackingMode:       TrackingModeWarn, // 기본: 경고만
+			TrackingAutoCreate: true,             // 자동 포트 생성 제안 활성화
+		},
+		Context: ContextConfig{
+			TokenBudget: 15000, // 기본 15K 토큰
+			Allocation: ContextAllocation{
+				PortSpec:      40, // 40%
+				Conventions:   25, // 25%
+				RecentChanges: 15, // 15%
+				RelatedDocs:   15, // 15%
+				SessionInfo:   5,  // 5%
+			},
+			Strategy: "priority",
+			Minimum: ContextMinimum{
+				PortSpec:    2000,
+				Conventions: 1000,
+			},
 		},
 	}
 }

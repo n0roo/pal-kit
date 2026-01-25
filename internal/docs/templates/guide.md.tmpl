@@ -1,0 +1,72 @@
+# {{ .Title }}
+
+> {{ .Description }}
+
+## 📋 목차
+
+{{ range $i, $section := .Sections }}
+{{ $num := add $i 1 }}
+{{ $num }}. [{{ $section.Title }}](#{{ $section.Anchor }})
+{{ end }}
+
+## 📌 이 가이드에서 배우는 것
+
+{{ range .LearningGoals }}
+- {{ . }}
+{{ end }}
+
+## ✅ 사전 요구사항
+
+{{ range .Prerequisites }}
+- {{ . }}
+{{ end }}
+
+---
+
+{{ range $i, $section := .Sections }}
+## {{ $section.Title }}
+
+{{ $section.Content }}
+
+{{ if $section.Steps }}
+{{ range $j, $step := $section.Steps }}
+### 단계 {{ add $j 1 }}: {{ $step.Title }}
+
+{{ $step.Description }}
+
+{{ if $step.Code }}
+```{{ $step.Language }}
+{{ $step.Code }}
+```
+{{ end }}
+
+{{ if $step.Note }}
+> 💡 **참고**: {{ $step.Note }}
+{{ end }}
+
+{{ end }}
+{{ end }}
+
+{{ end }}
+
+---
+
+## 🎉 완료!
+
+축하합니다! 이 가이드를 완료했습니다.
+
+### 다음 단계
+
+{{ range .NextSteps }}
+- [{{ .Title }}]({{ .Link }})
+{{ end }}
+
+### 도움이 필요하신가요?
+
+- [FAQ](./faq.md)
+- [트러블슈팅](./troubleshooting.md)
+- [GitHub Issues]({{ .IssuesLink }})
+
+---
+
+*마지막 업데이트: {{ .UpdatedAt }}*

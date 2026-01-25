@@ -95,6 +95,63 @@ var agentAddCmd = &cobra.Command{
 	RunE: runAgentAdd,
 }
 
+// Global agent management commands
+var agentGlobalCmd = &cobra.Command{
+	Use:   "global",
+	Short: "전역 에이전트 관리",
+	Long: `전역 에이전트 저장소를 관리합니다.
+
+전역 에이전트는 ~/.pal/ 디렉토리에 저장되며,
+Electron GUI에서 수정하거나 CLI로 관리할 수 있습니다.
+
+프로젝트에서 'pal init'을 실행하면 전역 에이전트가 복사됩니다.
+`,
+}
+
+var agentGlobalListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "전역 에이전트 목록",
+	RunE:  runAgentGlobalList,
+}
+
+var agentGlobalInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "전역 에이전트 초기화 (내장 템플릿에서)",
+	Long: `내장된 템플릿에서 전역 에이전트를 초기화합니다.
+
+--force 옵션을 사용하면 기존 파일을 덮어씁니다.
+`,
+	RunE: runAgentGlobalInit,
+}
+
+var agentGlobalSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "전역 에이전트를 현재 프로젝트에 동기화",
+	Long: `전역 에이전트를 현재 프로젝트에 복사합니다.
+
+이미 존재하는 파일은 건너뜁니다.
+--force 옵션으로 덮어쓸 수 있습니다.
+`,
+	RunE: runAgentGlobalSync,
+}
+
+var agentGlobalResetCmd = &cobra.Command{
+	Use:   "reset",
+	Short: "전역 에이전트를 기본값으로 초기화",
+	Long:  `전역 에이전트를 내장 템플릿으로 재설정합니다. 모든 수정 사항이 삭제됩니다.`,
+	RunE:  runAgentGlobalReset,
+}
+
+var agentGlobalPathCmd = &cobra.Command{
+	Use:   "path",
+	Short: "전역 에이전트 경로 출력",
+	RunE:  runAgentGlobalPath,
+}
+
+var (
+	globalForce bool
+)
+
 func init() {
 	rootCmd.AddCommand(agentCmd)
 	agentCmd.AddCommand(agentListCmd)
@@ -106,8 +163,21 @@ func init() {
 	agentCmd.AddCommand(agentTemplatesCmd)
 	agentCmd.AddCommand(agentAddCmd)
 
+	// Global agent commands
+	agentCmd.AddCommand(agentGlobalCmd)
+	agentGlobalCmd.AddCommand(agentGlobalListCmd)
+	agentGlobalCmd.AddCommand(agentGlobalInitCmd)
+	agentGlobalCmd.AddCommand(agentGlobalSyncCmd)
+	agentGlobalCmd.AddCommand(agentGlobalResetCmd)
+	agentGlobalCmd.AddCommand(agentGlobalPathCmd)
+
 	agentCreateCmd.Flags().StringVar(&agentType, "type", "worker", "에이전트 타입")
 	agentCreateCmd.Flags().StringVar(&agentPrompt, "prompt", "", "프롬프트 (또는 file:경로)")
+
+	// Global flags
+	agentGlobalInitCmd.Flags().BoolVar(&globalForce, "force", false, "기존 파일 덮어쓰기")
+	agentGlobalSyncCmd.Flags().BoolVar(&globalForce, "force", false, "기존 파일 덮어쓰기")
+	agentGlobalResetCmd.Flags().BoolVar(&globalForce, "force", false, "확인 없이 초기화")
 }
 
 func getAgentService() (*agent.Service, error) {
@@ -496,5 +566,237 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 	fmt.Println("💡 에이전트 확인:")
 	fmt.Printf("   pal agent show %s\n", strings.TrimSuffix(targetName, ext))
 
+	return nil
+}
+
+// Global agent management functions
+
+func runAgentGlobalList(cmd *cobra.Command, args []string) error {
+	store := agent.NewGlobalAgentStore(config.GlobalDir())
+
+	if !store.IsInitialized() {
+		return fmt.Errorf("전역 에이전트가 초기화되지 않았습니다.\n실행: pal agent global init")
+	}
+
+	agents, err := store.List()
+	if err != nil {
+		return fmt.Errorf("에이전트 목록 조회 실패: %w", err)
+	}
+
+	skills, err := store.ListSkills()
+	if err != nil {
+		return fmt.Errorf("스킬 목록 조회 실패: %w", err)
+	}
+
+	conventions, err := store.ListConventions()
+	if err != nil {
+		return fmt.Errorf("컨벤션 목록 조회 실패: %w", err)
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"agents":      agents,
+			"skills":      skills,
+			"conventions": conventions,
+		})
+	}
+
+	manifest, _ := store.GetManifest()
+
+	fmt.Println("📦 전역 에이전트 저장소")
+	fmt.Println()
+	fmt.Printf("경로: %s\n", config.GlobalDir())
+	if manifest != nil {
+		fmt.Printf("버전: %s\n", manifest.Version)
+		fmt.Printf("마지막 업데이트: %s\n", manifest.LastUpdated.Format("2006-01-02 15:04:05"))
+	}
+	fmt.Println()
+
+	// Agents by category
+	coreAgents := []agent.AgentInfo{}
+	workerAgents := []agent.AgentInfo{}
+	for _, a := range agents {
+		if a.Category == "core" {
+			coreAgents = append(coreAgents, a)
+		} else {
+			workerAgents = append(workerAgents, a)
+		}
+	}
+
+	fmt.Printf("🏛️  Core 에이전트 (%d개)\n", len(coreAgents))
+	for _, a := range coreAgents {
+		rules := ""
+		if a.HasRules {
+			rules = " [+rules]"
+		}
+		fmt.Printf("   - %s%s\n", a.Name, rules)
+	}
+	fmt.Println()
+
+	fmt.Printf("👷 Worker 에이전트 (%d개)\n", len(workerAgents))
+	for _, a := range workerAgents {
+		rules := ""
+		if a.HasRules {
+			rules = " [+rules]"
+		}
+		fmt.Printf("   - %s (%s)%s\n", a.Name, a.Category, rules)
+	}
+	fmt.Println()
+
+	fmt.Printf("🎯 스킬 (%d개)\n", len(skills))
+	for _, s := range skills {
+		fmt.Printf("   - %s/%s\n", s.Category, s.Name)
+	}
+	fmt.Println()
+
+	fmt.Printf("📜 컨벤션 (%d개)\n", len(conventions))
+	// Group by category
+	convByCategory := map[string][]string{}
+	for _, c := range conventions {
+		convByCategory[c.Category] = append(convByCategory[c.Category], c.Name)
+	}
+	for cat, names := range convByCategory {
+		fmt.Printf("   %s: %s\n", cat, strings.Join(names, ", "))
+	}
+
+	return nil
+}
+
+func runAgentGlobalInit(cmd *cobra.Command, args []string) error {
+	store := agent.NewGlobalAgentStore(config.GlobalDir())
+
+	if store.IsInitialized() && !globalForce {
+		fmt.Println("ℹ️ 전역 에이전트가 이미 초기화되어 있습니다.")
+		fmt.Println("   --force 옵션으로 재초기화할 수 있습니다.")
+		return nil
+	}
+
+	fmt.Println("🔄 전역 에이전트 초기화 중...")
+
+	if err := store.Initialize(globalForce); err != nil {
+		return fmt.Errorf("초기화 실패: %w", err)
+	}
+
+	// Count files
+	agents, _ := store.List()
+	skills, _ := store.ListSkills()
+	conventions, _ := store.ListConventions()
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":      "initialized",
+			"path":        config.GlobalDir(),
+			"agents":      len(agents),
+			"skills":      len(skills),
+			"conventions": len(conventions),
+		})
+	}
+
+	fmt.Println("✅ 전역 에이전트 초기화 완료!")
+	fmt.Println()
+	fmt.Printf("경로: %s\n", config.GlobalDir())
+	fmt.Printf("에이전트: %d개\n", len(agents))
+	fmt.Printf("스킬: %d개\n", len(skills))
+	fmt.Printf("컨벤션: %d개\n", len(conventions))
+	fmt.Println()
+	fmt.Println("💡 에이전트 목록 확인:")
+	fmt.Println("   pal agent global list")
+
+	return nil
+}
+
+func runAgentGlobalSync(cmd *cobra.Command, args []string) error {
+	store := agent.NewGlobalAgentStore(config.GlobalDir())
+
+	if !store.IsInitialized() {
+		return fmt.Errorf("전역 에이전트가 초기화되지 않았습니다.\n실행: pal agent global init")
+	}
+
+	// Find project root
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL Kit 프로젝트를 찾을 수 없습니다.\n먼저 'pal init'을 실행하세요.")
+	}
+
+	fmt.Printf("🔄 전역 에이전트를 프로젝트에 동기화 중...\n")
+	fmt.Printf("   소스: %s\n", config.GlobalDir())
+	fmt.Printf("   대상: %s\n", projectRoot)
+	fmt.Println()
+
+	copied, err := store.SyncToProject(projectRoot, globalForce)
+	if err != nil {
+		return fmt.Errorf("동기화 실패: %w", err)
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":       "synced",
+			"project_root": projectRoot,
+			"copied":       copied,
+		})
+	}
+
+	if copied == 0 {
+		fmt.Println("ℹ️ 모든 파일이 이미 존재합니다.")
+		fmt.Println("   --force 옵션으로 덮어쓸 수 있습니다.")
+	} else {
+		fmt.Printf("✅ %d개 파일 동기화 완료!\n", copied)
+	}
+
+	return nil
+}
+
+func runAgentGlobalReset(cmd *cobra.Command, args []string) error {
+	if !globalForce {
+		fmt.Println("⚠️ 전역 에이전트를 기본값으로 초기화합니다.")
+		fmt.Println("   모든 수정 사항이 삭제됩니다.")
+		fmt.Println()
+		fmt.Println("계속하려면 --force 옵션을 사용하세요.")
+		return nil
+	}
+
+	store := agent.NewGlobalAgentStore(config.GlobalDir())
+
+	fmt.Println("🔄 전역 에이전트 초기화 중...")
+
+	if err := store.Initialize(true); err != nil {
+		return fmt.Errorf("초기화 실패: %w", err)
+	}
+
+	agents, _ := store.List()
+	skills, _ := store.ListSkills()
+	conventions, _ := store.ListConventions()
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":      "reset",
+			"path":        config.GlobalDir(),
+			"agents":      len(agents),
+			"skills":      len(skills),
+			"conventions": len(conventions),
+		})
+	}
+
+	fmt.Println("✅ 전역 에이전트가 기본값으로 초기화되었습니다!")
+	fmt.Printf("   에이전트: %d개\n", len(agents))
+	fmt.Printf("   스킬: %d개\n", len(skills))
+	fmt.Printf("   컨벤션: %d개\n", len(conventions))
+
+	return nil
+}
+
+func runAgentGlobalPath(cmd *cobra.Command, args []string) error {
+	globalPath := config.GlobalDir()
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"path":        globalPath,
+			"agents":      filepath.Join(globalPath, "agents"),
+			"conventions": filepath.Join(globalPath, "conventions"),
+		})
+	}
+
+	fmt.Println(globalPath)
 	return nil
 }

@@ -1,0 +1,18 @@
+id: common
+name: Common Conventions
+type: coding-style
+description: 공통 코딩 컨벤션
+enabled: true
+priority: 5
+rules:
+  - id: todo-format
+    description: TODO 주석 형식 준수 - TODO(담당자): 설명
+    pattern: "TODO\\([\\w-]+\\):"
+    severity: info
+examples:
+  good:
+    - code: "// TODO(username): 설명"
+      description: 담당자와 설명이 있는 TODO
+  bad:
+    - code: "// TODO: 나중에 수정"
+      description: 담당자 없는 TODO

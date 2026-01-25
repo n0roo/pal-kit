@@ -112,6 +112,18 @@ func (s *Service) GenerateContext() (string, error) {
 			sb.WriteString(fmt.Sprintf("  - #%d: %s\n", e.ID, issue))
 		}
 	}
+	sb.WriteString("\n")
+
+	// v11: 빠른 명령어
+	sb.WriteString("### 빠른 명령어\n")
+	sb.WriteString("```bash\n")
+	if len(runningPorts) > 0 {
+		sb.WriteString(fmt.Sprintf("pal port show %s       # 현재 포트 상세\n", runningPorts[0].ID))
+	}
+	sb.WriteString("pal context status         # 컨텍스트 예산 상태\n")
+	sb.WriteString("pal port list              # 포트 목록\n")
+	sb.WriteString("pal hook events            # 최근 이벤트\n")
+	sb.WriteString("```\n")
 
 	return sb.String(), nil
 }

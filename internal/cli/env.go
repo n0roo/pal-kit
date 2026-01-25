@@ -65,10 +65,67 @@ var envDeleteCmd = &cobra.Command{
 	RunE:  runEnvDelete,
 }
 
+var envShowCmd = &cobra.Command{
+	Use:   "show [name]",
+	Short: "환경 상세 정보",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runEnvShow,
+}
+
+var envAddProjectCmd = &cobra.Command{
+	Use:   "add-project <project-id>",
+	Short: "프로젝트 경로 추가",
+	Long:  `현재 환경에 프로젝트 ID와 경로 매핑을 추가합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvAddProject,
+}
+
+var envRemoveProjectCmd = &cobra.Command{
+	Use:   "remove-project <project-id>",
+	Short: "프로젝트 제거",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvRemoveProject,
+}
+
+var envAddDocsCmd = &cobra.Command{
+	Use:   "add-docs <docs-id>",
+	Short: "Docs vault 추가",
+	Long:  `현재 환경에 Docs vault ID와 경로 매핑을 추가합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvAddDocs,
+}
+
+var envRemoveDocsCmd = &cobra.Command{
+	Use:   "remove-docs <docs-id>",
+	Short: "Docs vault 제거",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvRemoveDocs,
+}
+
+var envLinkCmd = &cobra.Command{
+	Use:   "link <project-id> <docs-id>",
+	Short: "프로젝트와 Docs 연결",
+	Long:  `프로젝트를 Docs vault에 연결합니다. 연결 후 apply 시 settings.local.json에 반영됩니다.`,
+	Args:  cobra.ExactArgs(2),
+	RunE:  runEnvLink,
+}
+
+var envApplyCmd = &cobra.Command{
+	Use:   "apply [project-id]",
+	Short: "settings.local.json 생성",
+	Long: `프로젝트의 .claude/settings.local.json을 생성합니다.
+project-id를 생략하면 모든 프로젝트에 적용합니다.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runEnvApply,
+}
+
 var (
-	envWorkspace  string
-	envClaudeData string
-	envAutoSwitch bool
+	envWorkspace   string
+	envClaudeData  string
+	envAutoSwitch  bool
+	envProjectPath string
+	envProjectDocs string
+	envDocsPath    string
 )
 
 func init() {
@@ -80,6 +137,13 @@ func init() {
 	envCmd.AddCommand(envSwitchCmd)
 	envCmd.AddCommand(envDetectCmd)
 	envCmd.AddCommand(envDeleteCmd)
+	envCmd.AddCommand(envShowCmd)
+	envCmd.AddCommand(envAddProjectCmd)
+	envCmd.AddCommand(envRemoveProjectCmd)
+	envCmd.AddCommand(envAddDocsCmd)
+	envCmd.AddCommand(envRemoveDocsCmd)
+	envCmd.AddCommand(envLinkCmd)
+	envCmd.AddCommand(envApplyCmd)
 
 	// setup flags
 	defaults := env.DefaultPaths()
@@ -88,6 +152,15 @@ func init() {
 
 	// detect flags
 	envDetectCmd.Flags().BoolVar(&envAutoSwitch, "switch", false, "감지된 환경으로 자동 전환")
+
+	// add-project flags
+	envAddProjectCmd.Flags().StringVarP(&envProjectPath, "path", "p", "", "프로젝트 경로 (필수)")
+	envAddProjectCmd.Flags().StringVarP(&envProjectDocs, "docs", "d", "", "연결할 Docs ID")
+	envAddProjectCmd.MarkFlagRequired("path")
+
+	// add-docs flags
+	envAddDocsCmd.Flags().StringVarP(&envDocsPath, "path", "p", "", "Vault 경로 (필수)")
+	envAddDocsCmd.MarkFlagRequired("path")
 }
 
 func runEnvSetup(cmd *cobra.Command, args []string) error {
@@ -221,6 +294,18 @@ func runEnvSwitch(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("환경 전환 완료: %s\n", name)
+
+	// Auto-regenerate settings.local.json for all projects
+	paths, err := svc.GenerateAllSettingsLocal()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "경고: settings.local.json 생성 실패: %v\n", err)
+	} else if len(paths) > 0 {
+		fmt.Println("\nsettings.local.json 업데이트:")
+		for _, p := range paths {
+			fmt.Printf("  ✓ %s\n", p)
+		}
+	}
+
 	return nil
 }
 
@@ -277,6 +362,196 @@ func runEnvDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("환경 삭제 완료: %s\n", name)
+	return nil
+}
+
+func runEnvShow(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+
+	var target *env.Environment
+	if len(args) > 0 {
+		target, err = svc.Get(args[0])
+	} else {
+		target, err = svc.Current()
+	}
+	if err != nil {
+		return fmt.Errorf("환경 조회 실패: %w", err)
+	}
+
+	if IsJSON() {
+		return printJSON(target)
+	}
+
+	fmt.Printf("환경: %s", target.Name)
+	if target.IsCurrent {
+		fmt.Printf(" (현재)")
+	}
+	fmt.Println()
+	fmt.Printf("  ID: %s\n", target.ID)
+	fmt.Printf("  Hostname: %s\n", target.Hostname)
+	fmt.Printf("\n기본 경로:\n")
+	fmt.Printf("  $workspace   → %s\n", target.Paths.Workspace)
+	fmt.Printf("  $claude_data → %s\n", target.Paths.ClaudeData)
+	fmt.Printf("  $home        → %s\n", target.Paths.Home)
+
+	if len(target.Docs) > 0 {
+		fmt.Printf("\nDocs Vaults:\n")
+		for id, vault := range target.Docs {
+			fmt.Printf("  %s → %s\n", id, vault.Path)
+		}
+	}
+
+	if len(target.Projects) > 0 {
+		fmt.Printf("\n프로젝트:\n")
+		for id, proj := range target.Projects {
+			docsInfo := ""
+			if proj.DocsRef != "" {
+				docsInfo = fmt.Sprintf(" (docs: %s)", proj.DocsRef)
+			}
+			fmt.Printf("  %s → %s%s\n", id, proj.Path, docsInfo)
+		}
+	}
+
+	return nil
+}
+
+func runEnvAddProject(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+	projectID := args[0]
+
+	if err := svc.AddProject(projectID, envProjectPath, envProjectDocs); err != nil {
+		return fmt.Errorf("프로젝트 추가 실패: %w", err)
+	}
+
+	fmt.Printf("프로젝트 추가 완료: %s → %s\n", projectID, envProjectPath)
+	if envProjectDocs != "" {
+		fmt.Printf("  연결된 Docs: %s\n", envProjectDocs)
+	}
+
+	return nil
+}
+
+func runEnvRemoveProject(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+	projectID := args[0]
+
+	if err := svc.RemoveProject(projectID); err != nil {
+		return fmt.Errorf("프로젝트 제거 실패: %w", err)
+	}
+
+	fmt.Printf("프로젝트 제거 완료: %s\n", projectID)
+	return nil
+}
+
+func runEnvAddDocs(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+	docsID := args[0]
+
+	if err := svc.AddDocs(docsID, envDocsPath); err != nil {
+		return fmt.Errorf("Docs 추가 실패: %w", err)
+	}
+
+	fmt.Printf("Docs vault 추가 완료: %s → %s\n", docsID, envDocsPath)
+	return nil
+}
+
+func runEnvRemoveDocs(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+	docsID := args[0]
+
+	if err := svc.RemoveDocs(docsID); err != nil {
+		return fmt.Errorf("Docs 제거 실패: %w", err)
+	}
+
+	fmt.Printf("Docs vault 제거 완료: %s\n", docsID)
+	return nil
+}
+
+func runEnvLink(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+	projectID := args[0]
+	docsID := args[1]
+
+	if err := svc.LinkProjectToDocs(projectID, docsID); err != nil {
+		return fmt.Errorf("연결 실패: %w", err)
+	}
+
+	fmt.Printf("연결 완료: %s ↔ %s\n", projectID, docsID)
+	fmt.Println("'pal env apply'로 settings.local.json을 생성하세요.")
+	return nil
+}
+
+func runEnvApply(cmd *cobra.Command, args []string) error {
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return fmt.Errorf("DB 열기 실패: %w", err)
+	}
+	defer database.Close()
+
+	svc := env.NewService(database)
+
+	if len(args) > 0 {
+		// Apply to specific project
+		projectID := args[0]
+		path, err := svc.GenerateSettingsLocal(projectID)
+		if err != nil {
+			return fmt.Errorf("설정 생성 실패: %w", err)
+		}
+		fmt.Printf("생성 완료: %s\n", path)
+		return nil
+	}
+
+	// Apply to all projects
+	paths, err := svc.GenerateAllSettingsLocal()
+	if err != nil {
+		return fmt.Errorf("설정 생성 실패: %w", err)
+	}
+
+	if len(paths) == 0 {
+		fmt.Println("등록된 프로젝트가 없습니다.")
+		return nil
+	}
+
+	fmt.Println("생성 완료:")
+	for _, p := range paths {
+		fmt.Printf("  %s\n", p)
+	}
 	return nil
 }
 

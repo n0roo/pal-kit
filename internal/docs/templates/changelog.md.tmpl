@@ -1,0 +1,80 @@
+# Changelog
+
+이 프로젝트의 모든 주요 변경 사항을 문서화합니다.
+
+형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르며,
+버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
+
+## [Unreleased]
+
+### Added
+<!-- 새로운 기능 -->
+
+### Changed
+<!-- 기존 기능 변경 -->
+
+### Deprecated
+<!-- 곧 제거될 기능 -->
+
+### Removed
+<!-- 제거된 기능 -->
+
+### Fixed
+<!-- 버그 수정 -->
+
+### Security
+<!-- 보안 관련 수정 -->
+
+{{ range .Releases }}
+## [{{ .Version }}] - {{ .Date }}
+
+{{ if .Added }}
+### Added
+{{ range .Added }}
+- {{ .Description }}{{ if .IssueNumber }} (#{{ .IssueNumber }}){{ end }}
+{{ end }}
+{{ end }}
+
+{{ if .Changed }}
+### Changed
+{{ range .Changed }}
+- {{ .Description }}{{ if .IssueNumber }} (#{{ .IssueNumber }}){{ end }}
+{{ end }}
+{{ end }}
+
+{{ if .Deprecated }}
+### Deprecated
+{{ range .Deprecated }}
+- {{ .Description }}{{ if .IssueNumber }} (#{{ .IssueNumber }}){{ end }}
+{{ end }}
+{{ end }}
+
+{{ if .Removed }}
+### Removed
+{{ range .Removed }}
+- {{ .Description }}{{ if .IssueNumber }} (#{{ .IssueNumber }}){{ end }}
+{{ end }}
+{{ end }}
+
+{{ if .Fixed }}
+### Fixed
+{{ range .Fixed }}
+- {{ .Description }}{{ if .IssueNumber }} (#{{ .IssueNumber }}){{ end }}
+{{ end }}
+{{ end }}
+
+{{ if .Security }}
+### Security
+{{ range .Security }}
+- {{ .Description }}{{ if .IssueNumber }} (#{{ .IssueNumber }}){{ end }}
+{{ end }}
+{{ end }}
+
+{{ end }}
+
+{{ if .CompareLinks }}
+<!-- 버전 비교 링크 -->
+{{ range .CompareLinks }}
+[{{ .Version }}]: {{ .URL }}
+{{ end }}
+{{ end }}

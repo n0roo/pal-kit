@@ -1,0 +1,66 @@
+# {{ .Name }}
+
+## 개요
+
+{{ .Description }}
+
+## 시그니처
+
+```{{ .Language }}
+{{ .Signature }}
+```
+
+## 파라미터
+
+| 이름 | 타입 | 필수 | 기본값 | 설명 |
+|------|------|:----:|--------|------|
+{{ range .Parameters }}
+| {{ .Name }} | `{{ .Type }}` | {{ if .Required }}✓{{ end }} | {{ .Default }} | {{ .Description }} |
+{{ end }}
+
+## 반환값
+
+{{ if .ReturnValue }}
+- **성공**: `{{ .ReturnValue.Type }}` - {{ .ReturnValue.Description }}
+{{ end }}
+{{ if .ErrorValue }}
+- **실패**: `{{ .ErrorValue.Type }}` - {{ .ErrorValue.Description }}
+{{ end }}
+
+## 예제
+
+### 기본 사용
+
+```{{ .Language }}
+{{ .BasicExample }}
+```
+
+{{ if .AdvancedExample }}
+### 고급 사용
+
+```{{ .Language }}
+{{ .AdvancedExample }}
+```
+{{ end }}
+
+## 에러
+
+{{ if .Errors }}
+| 에러 | 발생 조건 | 해결 방법 |
+|------|----------|----------|
+{{ range .Errors }}
+| `{{ .Name }}` | {{ .Condition }} | {{ .Solution }} |
+{{ end }}
+{{ else }}
+이 API는 에러를 반환하지 않습니다.
+{{ end }}
+
+## 관련 API
+
+{{ range .RelatedAPIs }}
+- [`{{ .Name }}`]({{ .Link }}) - {{ .Description }}
+{{ end }}
+
+---
+
+*마지막 업데이트: {{ .UpdatedAt }}*
