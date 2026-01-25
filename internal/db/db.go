@@ -9,7 +9,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 // 기본 테이블 (v1 호환)
 const schemaBase = `
@@ -550,6 +550,73 @@ CREATE TABLE IF NOT EXISTS orchestration_ports (
 CREATE INDEX IF NOT EXISTS idx_orchestration_ports_status ON orchestration_ports(status);
 `
 
+// v11 추가 테이블 (Worker 간 직접 통신)
+const schemaV11 = `
+-- ============================================================
+-- Worker 간 직접 통신 채널
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS direct_channels (
+    id TEXT PRIMARY KEY,
+    session_a TEXT NOT NULL,                   -- Worker A (보통 Impl Worker)
+    session_b TEXT NOT NULL,                   -- Worker B (보통 Test Worker)
+    port_id TEXT,                              -- 연관된 포트
+    orchestration_id TEXT,                     -- 연관된 Orchestration
+    status TEXT DEFAULT 'active',              -- active, closed
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME,
+    FOREIGN KEY (session_a) REFERENCES sessions(id),
+    FOREIGN KEY (session_b) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_direct_channels_sessions ON direct_channels(session_a, session_b);
+CREATE INDEX IF NOT EXISTS idx_direct_channels_port ON direct_channels(port_id);
+CREATE INDEX IF NOT EXISTS idx_direct_channels_status ON direct_channels(status);
+
+-- ============================================================
+-- 직접 통신 메시지
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS direct_messages (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    from_session TEXT NOT NULL,
+    to_session TEXT NOT NULL,
+    message_type TEXT NOT NULL,                -- result, feedback, query, ack
+    payload TEXT,                              -- JSON: 메시지 내용
+    delivered_at DATETIME,
+    processed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (channel_id) REFERENCES direct_channels(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_direct_messages_channel ON direct_messages(channel_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_direct_messages_to ON direct_messages(to_session, delivered_at);
+CREATE INDEX IF NOT EXISTS idx_direct_messages_type ON direct_messages(message_type);
+
+-- ============================================================
+-- 피드백 루프 추적
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS feedback_loops (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    impl_session TEXT NOT NULL,
+    test_session TEXT NOT NULL,
+    port_id TEXT,
+    max_retries INTEGER DEFAULT 3,
+    current_retry INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'running',             -- running, success, failed, escalated
+    last_feedback_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
+    FOREIGN KEY (channel_id) REFERENCES direct_channels(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_loops_status ON feedback_loops(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_loops_port ON feedback_loops(port_id);
+`
+
 // DB wraps sql.DB with helper methods
 type DB struct {
 	*sql.DB
@@ -642,7 +709,12 @@ func (d *DB) Init() error {
 		return fmt.Errorf("v10 스키마 적용 실패: %w", err)
 	}
 
-	// 12. 버전 저장
+	// 12. v11 적용 (Worker 간 직접 통신)
+	if _, err := d.Exec(schemaV11); err != nil {
+		return fmt.Errorf("v11 스키마 적용 실패: %w", err)
+	}
+
+	// 13. 버전 저장
 	_, err := d.Exec(`INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)`, schemaVersion)
 	if err != nil {
 		return fmt.Errorf("버전 저장 실패: %w", err)
@@ -732,6 +804,18 @@ func (d *DB) migrate() error {
 		d.Exec(`ALTER TABLE escalations ADD COLUMN context TEXT`)
 		d.Exec(`ALTER TABLE escalations ADD COLUMN suggestion TEXT`)
 		d.Exec(`ALTER TABLE escalations ADD COLUMN resolution TEXT`)
+	}
+
+	// v10 -> v11: 세션 식별 강화 (Phase 1.2)
+	if currentVersion < 11 {
+		// sessions 테이블에 세션 식별 컬럼 추가
+		d.Exec(`ALTER TABLE sessions ADD COLUMN tty TEXT`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN parent_pid INTEGER`)
+		d.Exec(`ALTER TABLE sessions ADD COLUMN fingerprint TEXT`)
+
+		// 인덱스 추가
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_fingerprint ON sessions(fingerprint)`)
+		d.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_claude_id ON sessions(claude_session_id)`)
 	}
 
 	return nil

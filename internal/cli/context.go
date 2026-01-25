@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/n0roo/pal-kit/internal/context"
 	"github.com/n0roo/pal-kit/internal/db"
+	"github.com/n0roo/pal-kit/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -68,6 +70,40 @@ var ctxClaudeCmd = &cobra.Command{
 	RunE: runCtxClaude,
 }
 
+var ctxStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "컨텍스트 예산 상태",
+	Long: `현재 컨텍스트의 토큰 예산 사용량을 표시합니다.
+
+출력 정보:
+- 총 토큰 예산 및 사용량
+- 카테고리별 할당/사용량
+- 로드된 문서 목록`,
+	RunE: runCtxStatus,
+}
+
+var ctxCheckpointsCmd = &cobra.Command{
+	Use:   "checkpoints",
+	Short: "체크포인트 목록",
+	Long:  `저장된 체크포인트 목록을 표시합니다.`,
+	RunE:  runCtxCheckpoints,
+}
+
+var ctxRestoreCmd = &cobra.Command{
+	Use:   "restore <checkpoint-id>",
+	Short: "체크포인트에서 복구",
+	Long:  `지정한 체크포인트에서 컨텍스트를 복구합니다.`,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runCtxRestore,
+}
+
+var ctxCreateCheckpointCmd = &cobra.Command{
+	Use:   "checkpoint",
+	Short: "체크포인트 생성",
+	Long:  `현재 컨텍스트의 체크포인트를 생성합니다.`,
+	RunE:  runCtxCreateCheckpoint,
+}
+
 func init() {
 	rootCmd.AddCommand(contextCmd)
 	contextCmd.AddCommand(ctxShowCmd)
@@ -75,6 +111,10 @@ func init() {
 	contextCmd.AddCommand(ctxForPortCmd)
 	contextCmd.AddCommand(ctxReloadCmd)
 	contextCmd.AddCommand(ctxClaudeCmd)
+	contextCmd.AddCommand(ctxStatusCmd)
+	contextCmd.AddCommand(ctxCheckpointsCmd)
+	contextCmd.AddCommand(ctxRestoreCmd)
+	contextCmd.AddCommand(ctxCreateCheckpointCmd)
 
 	ctxInjectCmd.Flags().StringVar(&ctxFile, "file", "", "CLAUDE.md 파일 경로 (자동 탐색)")
 	ctxClaudeCmd.Flags().StringVar(&ctxPortID, "port", "", "포트 ID")
@@ -239,4 +279,236 @@ func runCtxClaude(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(ctx)
 	return nil
+}
+
+func runCtxStatus(cmd *cobra.Command, args []string) error {
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	// BudgetService를 통해 현재 상태 가져오기
+	budgetSvc := context.NewBudgetService(database, projectRoot)
+	report, err := budgetSvc.GetCurrentStatus()
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(report)
+	}
+
+	// 헤더
+	fmt.Printf("Context Budget: %s / %s tokens (%d%%)\n",
+		formatTokenCount(report.Used),
+		formatTokenCount(report.Total),
+		report.UsagePercent)
+	fmt.Println()
+
+	// 로드된 문서
+	fmt.Println("Loaded Documents:")
+	for _, item := range report.Items {
+		icon := getCategoryIconCLI(item.Category)
+		status := "✓"
+		if !item.Loaded {
+			status = "(pending)"
+		}
+		fmt.Printf("  %s %s (%s)  %s %s\n",
+			icon, item.Name, item.Category,
+			formatTokenCount(item.Tokens), status)
+	}
+	fmt.Println()
+
+	// 카테고리별 상세
+	fmt.Println("Category Allocation:")
+	for _, cat := range report.CategoryDetail {
+		percent := 0.0
+		if cat.Allocated > 0 {
+			percent = float64(cat.Used) / float64(cat.Allocated) * 100
+		}
+		bar := renderProgressBar(percent, 10)
+		fmt.Printf("  %-15s %s %s / %s\n",
+			cat.Category, bar,
+			formatTokenCount(cat.Used),
+			formatTokenCount(cat.Allocated))
+	}
+
+	return nil
+}
+
+// formatTokenCount formats token count with K suffix
+func formatTokenCount(tokens int) string {
+	if tokens >= 1000 {
+		return fmt.Sprintf("%.1fK", float64(tokens)/1000)
+	}
+	return fmt.Sprintf("%d", tokens)
+}
+
+// getCategoryIconCLI returns an emoji icon for a category
+func getCategoryIconCLI(category string) string {
+	switch category {
+	case context.CategoryPortSpec:
+		return "📄"
+	case context.CategoryConventions:
+		return "📘"
+	case context.CategoryRecentChanges:
+		return "📝"
+	case context.CategoryRelatedDocs:
+		return "📚"
+	case context.CategorySessionInfo:
+		return "ℹ️"
+	default:
+		return "📁"
+	}
+}
+
+func runCtxCheckpoints(cmd *cobra.Command, args []string) error {
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	cpSvc := context.NewCheckpointService(database, projectRoot)
+	checkpoints, err := cpSvc.ListCheckpoints("", 10)
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(checkpoints)
+	}
+
+	if len(checkpoints) == 0 {
+		fmt.Println("저장된 체크포인트가 없습니다.")
+		return nil
+	}
+
+	fmt.Println("체크포인트 목록:")
+	fmt.Println()
+	for _, cp := range checkpoints {
+		portInfo := "-"
+		if cp.ActivePort != nil {
+			portInfo = cp.ActivePort.ID
+			if cp.ActivePort.Title != "" {
+				portInfo += " (" + cp.ActivePort.Title + ")"
+			}
+		}
+		ago := formatTimeAgoCLI(cp.CreatedAt)
+		fmt.Printf("  %s  %s\n", cp.ID, ago)
+		fmt.Printf("    세션: %s\n", cp.SessionID[:8])
+		fmt.Printf("    포트: %s\n", portInfo)
+		fmt.Printf("    토큰: %s\n", formatTokenCount(cp.TokensUsed))
+		fmt.Println()
+	}
+
+	return nil
+}
+
+func runCtxRestore(cmd *cobra.Command, args []string) error {
+	checkpointID := args[0]
+
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	cpSvc := context.NewCheckpointService(database, projectRoot)
+	cp, err := cpSvc.RestoreCheckpoint(checkpointID)
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":     "restored",
+			"checkpoint": cp,
+		})
+	}
+
+	fmt.Printf("✓ 체크포인트 복구 완료: %s\n", cp.ID)
+	fmt.Println()
+	fmt.Println(cp.RecoveryPrompt)
+
+	return nil
+}
+
+func runCtxCreateCheckpoint(cmd *cobra.Command, args []string) error {
+	cwd, _ := os.Getwd()
+	projectRoot := context.FindProjectRoot(cwd)
+	if projectRoot == "" {
+		return fmt.Errorf("PAL 프로젝트를 찾을 수 없습니다")
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	// 활성 세션 찾기
+	sessionSvc := session.NewService(database)
+	activeSession, err := sessionSvc.FindActiveSession("", cwd, projectRoot)
+	if err != nil {
+		return fmt.Errorf("활성 세션을 찾을 수 없습니다: %w", err)
+	}
+	if activeSession == nil {
+		return fmt.Errorf("활성 세션이 없습니다")
+	}
+
+	cpSvc := context.NewCheckpointService(database, projectRoot)
+	cp, err := cpSvc.CreateCheckpoint(activeSession.ID)
+	if err != nil {
+		return err
+	}
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{
+			"status":     "created",
+			"checkpoint": cp,
+		})
+	}
+
+	fmt.Printf("✓ 체크포인트 생성 완료: %s\n", cp.ID)
+	if cp.ActivePort != nil {
+		fmt.Printf("  포트: %s\n", cp.ActivePort.ID)
+	}
+	fmt.Printf("  토큰: %s\n", formatTokenCount(cp.TokensUsed))
+
+	return nil
+}
+
+// formatTimeAgoCLI formats time as "X minutes ago" etc
+func formatTimeAgoCLI(t time.Time) string {
+	d := time.Since(t)
+
+	if d < time.Minute {
+		return "방금 전"
+	} else if d < time.Hour {
+		return fmt.Sprintf("%d분 전", int(d.Minutes()))
+	} else if d < 24*time.Hour {
+		return fmt.Sprintf("%d시간 전", int(d.Hours()))
+	} else {
+		return fmt.Sprintf("%d일 전", int(d.Hours()/24))
+	}
 }

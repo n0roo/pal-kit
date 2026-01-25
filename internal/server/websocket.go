@@ -37,10 +37,14 @@ const (
 	EventOrchestrationComplete EventType = "orchestration.complete"
 	EventWorkerSpawn           EventType = "worker.spawn"
 	EventWorkerComplete        EventType = "worker.complete"
+	EventWorkerProgress        EventType = "worker.progress"  // 신규: Worker 진행률
+	EventWorkerFeedback        EventType = "worker.feedback"  // 신규: Worker 피드백
 	EventPortUpdate            EventType = "port.update"
 	EventAttentionWarning      EventType = "attention.warning"
 	EventEscalation            EventType = "escalation.new"
+	EventEscalationResolved    EventType = "escalation.resolved" // 신규: 에스컬레이션 해결
 	EventMessageNew            EventType = "message.new"
+	EventDirectMessage         EventType = "direct.message" // 신규: 직접 메시지
 )
 
 // Event represents a real-time event (legacy compatibility)
@@ -146,6 +150,71 @@ func (e *EventEmitter) EmitMessage(msgID, fromSession, toSession, msgType string
 		"from":     fromSession,
 		"msg_type": msgType,
 	})
+}
+
+// WorkerProgressEvent represents a worker progress event
+type WorkerProgressEvent struct {
+	SessionID   string  `json:"session_id"`
+	PortID      string  `json:"port_id"`
+	Progress    float64 `json:"progress"`     // 0.0 ~ 1.0
+	CurrentTask string  `json:"current_task"`
+	TokensUsed  int     `json:"tokens_used"`
+}
+
+// WorkerFeedbackEvent represents a worker feedback event
+type WorkerFeedbackEvent struct {
+	SessionID    string   `json:"session_id"`
+	PortID       string   `json:"port_id"`
+	Success      bool     `json:"success"`
+	TestsPassed  int      `json:"tests_passed"`
+	TestsFailed  int      `json:"tests_failed"`
+	FailedTests  []string `json:"failed_tests,omitempty"`
+	Suggestions  []string `json:"suggestions,omitempty"`
+	RetryCount   int      `json:"retry_count"`
+}
+
+// DirectMessageEvent represents a direct message event
+type DirectMessageEvent struct {
+	ChannelID   string      `json:"channel_id"`
+	FromSession string      `json:"from_session"`
+	ToSession   string      `json:"to_session"`
+	MessageType string      `json:"message_type"`
+	Payload     interface{} `json:"payload,omitempty"`
+}
+
+// EscalationResolvedEvent represents an escalation resolved event
+type EscalationResolvedEvent struct {
+	EscalationID string `json:"escalation_id"`
+	SessionID    string `json:"session_id"`
+	PortID       string `json:"port_id,omitempty"`
+	Resolution   string `json:"resolution"`
+	ResolvedBy   string `json:"resolved_by,omitempty"`
+}
+
+// EmitWorkerProgress emits a worker progress event
+func (e *EventEmitter) EmitWorkerProgress(sessionID, portID string, progress float64, currentTask string, tokensUsed int) {
+	e.publisher.Publish(events.NewEvent("worker:progress", WorkerProgressEvent{
+		SessionID:   sessionID,
+		PortID:      portID,
+		Progress:    progress,
+		CurrentTask: currentTask,
+		TokensUsed:  tokensUsed,
+	}))
+}
+
+// EmitWorkerFeedback emits a worker feedback event
+func (e *EventEmitter) EmitWorkerFeedback(event WorkerFeedbackEvent) {
+	e.publisher.Publish(events.NewEvent("worker:feedback", event))
+}
+
+// EmitDirectMessage emits a direct message event
+func (e *EventEmitter) EmitDirectMessage(event DirectMessageEvent) {
+	e.publisher.Publish(events.NewEvent("direct:message", event))
+}
+
+// EmitEscalationResolved emits an escalation resolved event
+func (e *EventEmitter) EmitEscalationResolved(event EscalationResolvedEvent) {
+	e.publisher.Publish(events.NewEvent("escalation:resolved", event))
 }
 
 // StartPolling starts polling for changes (fallback for systems without real-time updates)

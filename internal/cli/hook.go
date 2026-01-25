@@ -16,7 +16,9 @@ import (
 	"github.com/n0roo/pal-kit/internal/document"
 	"github.com/n0roo/pal-kit/internal/lock"
 	"github.com/n0roo/pal-kit/internal/manifest"
+	"github.com/n0roo/pal-kit/internal/message"
 	"github.com/n0roo/pal-kit/internal/operator"
+	"github.com/n0roo/pal-kit/internal/orchestrator"
 	"github.com/n0roo/pal-kit/internal/port"
 	"github.com/n0roo/pal-kit/internal/recovery"
 	"github.com/n0roo/pal-kit/internal/rules"
@@ -85,15 +87,73 @@ type HookInput struct {
 	// Notification specific
 	Message          string `json:"message,omitempty"`
 	NotificationType string `json:"notification_type,omitempty"`
+
+	// TestFeedback specific (v11)
+	Payload map[string]interface{} `json:"payload,omitempty"`
 }
 
 // HookOutput represents JSON output for hook responses
 type HookOutput struct {
+	// 기본 필드 (호환성)
 	Decision   string                 `json:"decision,omitempty"` // "approve", "block", "allow", "deny", "ask"
 	Reason     string                 `json:"reason,omitempty"`
 	Continue   bool                   `json:"continue,omitempty"`
 	StopReason string                 `json:"stopReason,omitempty"`
 	HookOutput map[string]interface{} `json:"hookSpecificOutput,omitempty"`
+
+	// v11 확장 필드
+	Context       *ContextInfo          `json:"context,omitempty"`
+	Notifications []HookNotification    `json:"notifications,omitempty"`
+	Suggestions   []string              `json:"suggestions,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ContextInfo provides session and port context information
+type ContextInfo struct {
+	// 세션 상태
+	SessionID    string `json:"session_id,omitempty"`
+	SessionState string `json:"session_state"` // running, paused, ending
+	SessionType  string `json:"session_type"`  // main, sub, builder
+
+	// 포트 상태
+	ActivePort *PortSummary `json:"active_port,omitempty"`
+
+	// 문서 컨텍스트
+	LoadedDocs []DocRef `json:"loaded_docs,omitempty"`
+
+	// 토큰 사용량
+	TokensUsed   int `json:"tokens_used"`
+	TokenBudget  int `json:"token_budget"`
+
+	// Fingerprint (v11 세션 식별)
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// PortSummary provides a summary of a port's current state
+type PortSummary struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Status      string   `json:"status"` // pending, running, complete
+	Progress    string   `json:"progress,omitempty"`
+	StartedAt   string   `json:"started_at,omitempty"`
+	Checklist   []string `json:"checklist,omitempty"`
+	TokensUsed  int      `json:"tokens_used,omitempty"`
+}
+
+// DocRef represents a reference to a loaded document
+type DocRef struct {
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Type   string `json:"type"`   // convention, template, port-spec
+	Tokens int    `json:"tokens"`
+}
+
+// HookNotification represents a notification to be shown in the hook response
+type HookNotification struct {
+	Level   string `json:"level"`   // info, warn, error
+	Title   string `json:"title"`
+	Message string `json:"message"`
+	Action  string `json:"action,omitempty"` // 제안 액션 (선택적)
 }
 
 var (
@@ -241,6 +301,19 @@ var hookNotificationCmd = &cobra.Command{
 	RunE: runHookNotification,
 }
 
+var hookTestFeedbackCmd = &cobra.Command{
+	Use:   "test-feedback",
+	Short: "Test Feedback Hook",
+	Long: `Test Worker가 피드백을 전송할 때 호출됩니다.
+
+수행 작업:
+- 테스트 결과 수신
+- 피드백 루프 상태 업데이트
+- Impl Worker에 피드백 전달
+- 최대 재시도 초과 시 에스컬레이션`,
+	RunE: runHookTestFeedback,
+}
+
 var hookSubagentCmd = &cobra.Command{
 	Use:   "subagent",
 	Short: "Subagent Hook",
@@ -262,6 +335,7 @@ func init() {
 	hookCmd.AddCommand(hookStopCmd)
 	hookCmd.AddCommand(hookPreCompactCmd)
 	hookCmd.AddCommand(hookNotificationCmd)
+	hookCmd.AddCommand(hookTestFeedbackCmd)
 	hookCmd.AddCommand(hookSubagentCmd)
 	hookCmd.AddCommand(hookPortStartCmd)
 	hookCmd.AddCommand(hookPortEndCmd)
@@ -354,6 +428,9 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 	if palSessionID == "" {
 		palSessionID = uuid.New().String()[:8]
 
+		// 세션 식별 정보 수집 (v11)
+		tty, parentPID := session.GetProcessInfo()
+
 		// 동일 프로젝트에서 실행 중인 세션 수 확인
 		var runningCount int
 		var sessionType string
@@ -383,6 +460,8 @@ func runHookSessionStart(cmd *cobra.Command, args []string) error {
 			ProjectName:     projectName,
 			TranscriptPath:  input.TranscriptPath,
 			Cwd:             cwd,
+			TTY:             tty,       // v11: 터미널 식별자
+			ParentPID:       parentPID, // v11: 부모 프로세스 ID
 		}
 
 		if err := sessionSvc.StartWithFullOptions(opts); err != nil {
@@ -762,6 +841,23 @@ func runHookPreToolUse(cmd *cobra.Command, args []string) error {
 		}
 		projectRoot := context.FindProjectRoot(cwd)
 
+		// v11: 프로젝트 설정에서 TrackingMode 로드
+		trackingMode := config.TrackingModeWarn // 기본값
+		autoCreate := true
+		if projectRoot != "" {
+			if projectCfg, err := config.LoadProjectConfig(projectRoot); err == nil {
+				if projectCfg.Settings.TrackingMode != "" {
+					trackingMode = projectCfg.Settings.TrackingMode
+				}
+				autoCreate = projectCfg.Settings.TrackingAutoCreate
+			}
+		}
+
+		// TrackingMode가 off면 추적하지 않음
+		if trackingMode == config.TrackingModeOff {
+			return nil
+		}
+
 		// 활성 포트 확인
 		runningPorts, _ := portSvc.List("running", 10)
 
@@ -777,23 +873,87 @@ func runHookPreToolUse(cmd *cobra.Command, args []string) error {
 			palSessionID = palSession.ID
 		}
 
-		// 활성 포트가 없으면 경고
+		// 활성 포트가 없을 때 처리 (TrackingMode에 따라 다름)
 		if len(runningPorts) == 0 {
-			// stderr로 Claude에 피드백 (Claude가 읽음)
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "⚠️  [PAL Kit] 활성 포트가 없습니다!")
-			fmt.Fprintln(os.Stderr, "   코드 변경이 추적되지 않습니다.")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "   포트를 활성화하려면:")
-			fmt.Fprintln(os.Stderr, "   1. pal port create <id> --title \"작업명\"")
-			fmt.Fprintln(os.Stderr, "   2. pal hook port-start <id>")
-			fmt.Fprintln(os.Stderr, "")
-
 			// untracked_edit 이벤트 로깅
 			if palSessionID != "" {
-				eventData := fmt.Sprintf(`{"tool":"%s","file":"%s","warning":"no_active_port"}`,
-					input.ToolName, filePath)
+				eventData := fmt.Sprintf(`{"tool":"%s","file":"%s","warning":"no_active_port","mode":"%s"}`,
+					input.ToolName, filePath, trackingMode)
 				sessionSvc.LogEvent(palSessionID, "untracked_edit", eventData)
+			}
+
+			// v11: TrackingMode에 따른 응답
+			switch trackingMode {
+			case config.TrackingModeStrict:
+				// strict 모드: 포트 없으면 block
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintln(os.Stderr, "🚫 [PAL Kit] 포트 추적 필수 (strict 모드)")
+				fmt.Fprintln(os.Stderr, "   활성 포트가 없어 코드 변경이 차단되었습니다.")
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintln(os.Stderr, "   포트를 활성화하려면:")
+				fmt.Fprintln(os.Stderr, "   1. pal port create <id> --title \"작업명\"")
+				fmt.Fprintln(os.Stderr, "   2. pal hook port-start <id>")
+				fmt.Fprintln(os.Stderr, "")
+
+				suggestions := []string{
+					"pal port create <id> --title \"작업명\" 으로 포트 생성",
+					"pal hook port-start <id> 로 포트 활성화",
+				}
+				if autoCreate {
+					suggestions = append(suggestions, "또는 파일 경로 기반 포트 ID를 자동 생성할 수 있습니다")
+				}
+
+				output := HookOutput{
+					Decision: "block",
+					Reason:   "활성 포트가 없습니다. 포트를 먼저 활성화하세요.",
+					Context: &ContextInfo{
+						SessionID:    palSessionID,
+						SessionState: "running",
+					},
+					Notifications: []HookNotification{
+						{
+							Level:   "error",
+							Title:   "포트 추적 필수",
+							Message: "strict 모드에서는 포트 없이 코드를 수정할 수 없습니다.",
+							Action:  "pal hook port-start <id>",
+						},
+					},
+					Suggestions: suggestions,
+				}
+				json.NewEncoder(os.Stdout).Encode(output)
+				return nil
+
+			case config.TrackingModeWarn:
+				// warn 모드: 경고만 하고 허용
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintln(os.Stderr, "⚠️  [PAL Kit] 활성 포트가 없습니다!")
+				fmt.Fprintln(os.Stderr, "   코드 변경이 추적되지 않습니다.")
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintln(os.Stderr, "   포트를 활성화하려면:")
+				fmt.Fprintln(os.Stderr, "   1. pal port create <id> --title \"작업명\"")
+				fmt.Fprintln(os.Stderr, "   2. pal hook port-start <id>")
+				fmt.Fprintln(os.Stderr, "")
+
+				output := HookOutput{
+					Decision: "allow",
+					Context: &ContextInfo{
+						SessionID:    palSessionID,
+						SessionState: "running",
+					},
+					Notifications: []HookNotification{
+						{
+							Level:   "warn",
+							Title:   "포트 미활성",
+							Message: "코드 변경이 추적되지 않습니다. 포트를 활성화하세요.",
+							Action:  "pal hook port-start <id>",
+						},
+					},
+					Suggestions: []string{
+						"pal port create <id> --title \"작업명\" 으로 포트 생성",
+						"pal hook port-start <id> 로 포트 활성화",
+					},
+				}
+				json.NewEncoder(os.Stdout).Encode(output)
 			}
 		} else {
 			// 활성 포트가 있으면 포트 ID 표시
@@ -811,6 +971,31 @@ func runHookPreToolUse(cmd *cobra.Command, args []string) error {
 					input.ToolName, filePath, runningPorts[0].ID)
 				sessionSvc.LogEvent(palSessionID, "file_edit", eventData)
 			}
+
+			// v11: JSON 응답에 Context 추가 (활성 포트 정보 포함)
+			p := runningPorts[0]
+			title := p.ID
+			if p.Title.Valid {
+				title = p.Title.String
+			}
+			startedAt := ""
+			if p.StartedAt.Valid {
+				startedAt = p.StartedAt.Time.Format(time.RFC3339)
+			}
+			output := HookOutput{
+				Decision: "allow",
+				Context: &ContextInfo{
+					SessionID:    palSessionID,
+					SessionState: "running",
+					ActivePort: &PortSummary{
+						ID:        p.ID,
+						Title:     title,
+						Status:    p.Status,
+						StartedAt: startedAt,
+					},
+				},
+			}
+			json.NewEncoder(os.Stdout).Encode(output)
 		}
 
 		// Lock 확인 (기존 로직 유지)
@@ -982,13 +1167,25 @@ func runHookPreCompact(cmd *cobra.Command, args []string) error {
 		palSession, err := sessionSvc.FindByClaudeSessionID(claudeSessionID)
 		if err == nil && palSession != nil {
 			sessionSvc.IncrementCompact(palSession.ID)
-			
+
 			// 컴팩트 이벤트 로깅
 			trigger := input.Trigger
 			if trigger == "" {
 				trigger = "auto"
 			}
 			sessionSvc.LogEvent(palSession.ID, "compact", fmt.Sprintf(`{"trigger":"%s"}`, trigger))
+
+			// v11: 체크포인트 생성
+			cwd, _ := os.Getwd()
+			projectRoot := context.FindProjectRoot(cwd)
+			if projectRoot != "" {
+				cpSvc := context.NewCheckpointService(database, projectRoot)
+				if cp, err := cpSvc.CreateCheckpoint(palSession.ID); err == nil {
+					if verbose {
+						fmt.Printf("📷 Checkpoint created: %s\n", cp.ID)
+					}
+				}
+			}
 
 			if verbose {
 				fmt.Printf("📦 PreCompact: session=%s, trigger=%s\n", palSession.ID, trigger)
@@ -1569,6 +1766,14 @@ func runHookEvents(cmd *cobra.Command, args []string) error {
 		session.EventFileEdit:      "📝",
 		session.EventUntrackedEdit: "⚠️",
 		session.EventCompact:       "📦",
+		// v11: 새로운 이벤트 타입
+		session.EventContextLoaded:      "📚",
+		session.EventContextOverflow:    "💥",
+		session.EventAgentActivated:     "🤖",
+		session.EventAgentDeactivated:   "😴",
+		session.EventDependencyResolved: "🔗",
+		session.EventQualityWarning:     "🔍",
+		session.EventCheckpointCreated:  "💾",
 	}
 
 	for _, e := range events {
@@ -1733,6 +1938,21 @@ func runHookNotification(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// v11: 체크포인트 기반 복구 정보 보강
+	if projectRoot != "" {
+		cpSvc := context.NewCheckpointService(database, projectRoot)
+		if cp, err := cpSvc.GetLatestCheckpoint(palSessionID); err == nil && cp != nil {
+			recoveryCtx.CheckpointID = cp.ID
+			if cp.RecoveryPrompt != "" {
+				recoveryCtx.RecoveryPrompt = cp.RecoveryPrompt
+			}
+			if cp.ActivePort != nil && recoveryCtx.ActivePort == "" {
+				recoveryCtx.ActivePort = cp.ActivePort.ID
+				recoveryCtx.ActivePortTitle = cp.ActivePort.Title
+			}
+		}
+	}
+
 	// Compact 이벤트 기록 (recovery 서비스로)
 	recoverySvc.RecordCompactEvent(palSessionID, recoveryCtx)
 
@@ -1759,8 +1979,129 @@ func runHookNotification(cmd *cobra.Command, args []string) error {
 	json.NewEncoder(os.Stdout).Encode(output)
 
 	if verbose {
-		fmt.Fprintf(os.Stderr, "📦 Compact 감지: session=%s, port=%s, checkpoint=%s\n", 
+		fmt.Fprintf(os.Stderr, "📦 Compact 감지: session=%s, port=%s, checkpoint=%s\n",
 			palSessionID, recoveryCtx.ActivePort, recoveryCtx.CheckpointID)
+	}
+
+	return nil
+}
+
+// runHookTestFeedback handles test feedback from Test Worker
+func runHookTestFeedback(cmd *cobra.Command, args []string) error {
+	input, err := readHookInput()
+	if err != nil {
+		input = &HookInput{}
+	}
+
+	database, err := db.Open(GetDBPath())
+	if err != nil {
+		return nil
+	}
+	defer database.Close()
+
+	sessionSvc := session.NewService(database)
+	feedbackSvc := orchestrator.NewFeedbackService(database)
+	directStore := message.NewDirectStore(database.DB)
+
+	// 세션 ID 확인
+	claudeSessionID := input.SessionID
+	if claudeSessionID == "" {
+		claudeSessionID = os.Getenv("CLAUDE_SESSION_ID")
+	}
+
+	cwd := input.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	projectRoot := context.FindProjectRoot(cwd)
+
+	// PAL 세션 찾기
+	palSession, err := sessionSvc.FindActiveSession(claudeSessionID, cwd, projectRoot)
+	if err != nil || palSession == nil {
+		return nil
+	}
+
+	// 직접 채널 찾기
+	channel, err := directStore.GetChannelForSession(palSession.ID)
+	if err != nil || channel == nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "⚠️ 직접 채널을 찾을 수 없습니다\n")
+		}
+		return nil
+	}
+
+	// 피드백 루프 찾기
+	loop, err := feedbackSvc.GetFeedbackLoopByChannel(channel.ID)
+	if err != nil || loop == nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "⚠️ 피드백 루프를 찾을 수 없습니다\n")
+		}
+		return nil
+	}
+
+	// Payload 파싱
+	var feedback message.TestFeedbackPayload
+	if input.Payload != nil {
+		payloadJSON, _ := json.Marshal(input.Payload)
+		json.Unmarshal(payloadJSON, &feedback)
+	}
+
+	// 피드백 처리
+	ctx := cmd.Context()
+	result, err := feedbackSvc.ProcessTestFeedback(ctx, loop.ID, feedback)
+
+	// 응답 생성
+	output := HookOutput{
+		Decision: "approve",
+	}
+
+	if result != nil {
+		output.HookOutput = map[string]interface{}{
+			"event":        "test_feedback",
+			"loop_id":      loop.ID,
+			"iteration":    result.Iteration,
+			"success":      result.Success,
+			"tests_passed": result.TestsPassed,
+			"tests_failed": result.TestsFailed,
+		}
+
+		if result.Success {
+			output.Notifications = []HookNotification{{
+				Level:   "info",
+				Title:   "Test Feedback",
+				Message: fmt.Sprintf("✅ 모든 테스트 통과 (iteration %d)", result.Iteration),
+			}}
+		} else {
+			var msgBuilder strings.Builder
+			msgBuilder.WriteString(fmt.Sprintf("❌ 테스트 실패 (iteration %d/%d)\n\n", result.Iteration, loop.MaxRetries))
+			for _, ft := range result.FailedTests {
+				msgBuilder.WriteString(fmt.Sprintf("- %s", ft.Name))
+				if ft.SuggestedFix != "" {
+					msgBuilder.WriteString(fmt.Sprintf(": %s", ft.SuggestedFix))
+				}
+				msgBuilder.WriteString("\n")
+			}
+
+			output.Notifications = []HookNotification{{
+				Level:   "warning",
+				Title:   "Test Feedback",
+				Message: msgBuilder.String(),
+			}}
+
+			if err != nil && strings.Contains(err.Error(), "에스컬레이션") {
+				output.Suggestions = append(output.Suggestions, "최대 재시도 횟수를 초과했습니다. 에스컬레이션이 필요합니다.")
+			}
+		}
+	}
+
+	// 이벤트 로깅
+	sessionSvc.LogEvent(palSession.ID, "test_feedback", fmt.Sprintf(`{"loop_id":"%s","success":%t}`, loop.ID, feedback.Success))
+
+	json.NewEncoder(os.Stdout).Encode(output)
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "🧪 Test Feedback: loop=%s, success=%t, iteration=%d\n",
+			loop.ID, feedback.Success, loop.CurrentRetry)
 	}
 
 	return nil

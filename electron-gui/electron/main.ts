@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { spawn, ChildProcess, execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -309,6 +309,36 @@ ipcMain.handle('app:restart-server', async () => {
   await new Promise(r => setTimeout(r, 1000))
   const port = await startServer()
   return port > 0
+})
+
+// File explorer handlers
+ipcMain.handle('app:select-folder', async () => {
+  if (!mainWindow) return { path: null, canceled: true }
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: '프로젝트 폴더 선택',
+    buttonLabel: '선택',
+  })
+
+  return {
+    path: result.filePaths[0] || null,
+    canceled: result.canceled,
+  }
+})
+
+ipcMain.handle('app:open-in-explorer', async (_, folderPath: string) => {
+  try {
+    await shell.openPath(folderPath)
+    return { success: true }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('app:show-item-in-folder', async (_, itemPath: string) => {
+  shell.showItemInFolder(itemPath)
+  return { success: true }
 })
 
 // ============================================

@@ -20,6 +20,8 @@ type ExecutionState struct {
 	RetryCount        map[string]int      `json:"retry_count"`
 	StartedAt         time.Time           `json:"started_at"`
 	LastUpdateAt      time.Time           `json:"last_update_at"`
+	Graph             *DependencyGraph    `json:"-"` // 의존성 그래프
+	MaxParallelism    int                 `json:"max_parallelism"`
 }
 
 // ExecutorConfig holds executor configuration
@@ -28,6 +30,7 @@ type ExecutorConfig struct {
 	RetryDelay      time.Duration `json:"retry_delay"`
 	WorkerTimeout   time.Duration `json:"worker_timeout"`
 	DefaultAgentIDs AgentIDs      `json:"default_agent_ids"`
+	MaxParallelism  int           `json:"max_parallelism"` // 최대 병렬 워커 수
 }
 
 // AgentIDs holds default agent IDs for different worker types
@@ -39,9 +42,10 @@ type AgentIDs struct {
 // DefaultExecutorConfig returns default configuration
 func DefaultExecutorConfig() ExecutorConfig {
 	return ExecutorConfig{
-		MaxRetries:    3,
-		RetryDelay:    time.Second * 5,
-		WorkerTimeout: time.Minute * 30,
+		MaxRetries:     3,
+		RetryDelay:     time.Second * 5,
+		WorkerTimeout:  time.Minute * 30,
+		MaxParallelism: 4, // 기본 최대 4개 병렬 실행
 		DefaultAgentIDs: AgentIDs{
 			ImplWorker: "impl-worker-v1",
 			TestWorker: "test-worker-v1",
@@ -76,6 +80,21 @@ func (e *Executor) Start(orchestrationID, operatorSessionID, projectRoot string)
 		return nil, err
 	}
 
+	// Build dependency graph
+	graph := NewDependencyGraph(op.AtomicPorts)
+
+	// Validate no cycles
+	if graph.HasCycle() {
+		return nil, fmt.Errorf("순환 의존성이 감지되었습니다")
+	}
+
+	// Calculate max parallelism from graph stats
+	graphStats, _ := graph.GetStats()
+	maxParallel := e.config.MaxParallelism
+	if graphStats != nil && graphStats.MaxParallelism < maxParallel {
+		maxParallel = graphStats.MaxParallelism
+	}
+
 	state := &ExecutionState{
 		OrchestrationID:   orchestrationID,
 		OperatorSessionID: operatorSessionID,
@@ -83,19 +102,90 @@ func (e *Executor) Start(orchestrationID, operatorSessionID, projectRoot string)
 		RetryCount:        make(map[string]int),
 		StartedAt:         time.Now(),
 		LastUpdateAt:      time.Now(),
+		Graph:             graph,
+		MaxParallelism:    maxParallel,
 	}
 
 	e.states[orchestrationID] = state
 
-	// Start first batch of ports
-	if err := e.processNextPorts(state, op, projectRoot); err != nil {
+	// Start first batch of ports using dependency graph
+	if err := e.processReadyPorts(state, projectRoot); err != nil {
 		return state, err
 	}
 
 	return state, nil
 }
 
-// processNextPorts processes the next available ports
+// processReadyPorts processes all ports that are ready (dependencies complete)
+func (e *Executor) processReadyPorts(state *ExecutionState, projectRoot string) error {
+	if state.Graph == nil {
+		// Fallback to legacy processing
+		op, err := e.service.GetOrchestration(state.OrchestrationID)
+		if err != nil {
+			return err
+		}
+		return e.processNextPorts(state, op, projectRoot)
+	}
+
+	// Get ready ports from dependency graph
+	readyPorts := state.Graph.GetReadyPorts()
+
+	// Limit by max parallelism
+	availableSlots := state.MaxParallelism - len(state.ActiveWorkers)
+	if availableSlots <= 0 {
+		return nil // Already at max capacity
+	}
+
+	spawnCount := 0
+	for _, portID := range readyPorts {
+		if spawnCount >= availableSlots {
+			break
+		}
+
+		// Check if already active
+		alreadyActive := false
+		for _, activeID := range state.ActiveWorkers {
+			if ws, _ := e.service.GetWorkerSession(activeID); ws != nil && ws.PortID == portID {
+				alreadyActive = true
+				break
+			}
+		}
+		if alreadyActive {
+			continue
+		}
+
+		// Create AtomicPort from graph node
+		node := state.Graph.Nodes[portID]
+		port := &AtomicPort{
+			PortID:    portID,
+			Order:     node.Order,
+			Status:    node.Status,
+			DependsOn: node.DependsOn,
+		}
+
+		// Mark as running in graph
+		state.Graph.MarkRunning(portID)
+
+		// Spawn worker
+		ws, err := e.spawnWorkerForPort(state, port, projectRoot)
+		if err != nil {
+			state.Graph.MarkFailed(portID)
+			e.service.UpdatePortStatus(state.OrchestrationID, portID, "failed")
+			state.FailedPorts = append(state.FailedPorts, portID)
+			continue
+		}
+
+		state.CurrentPortID = portID
+		state.ActiveWorkers = append(state.ActiveWorkers, ws.ID)
+		e.service.UpdatePortStatus(state.OrchestrationID, portID, "running")
+		spawnCount++
+	}
+
+	state.LastUpdateAt = time.Now()
+	return nil
+}
+
+// processNextPorts processes the next available ports (legacy fallback)
 func (e *Executor) processNextPorts(state *ExecutionState, op *OrchestrationPort, projectRoot string) error {
 	for {
 		nextPort, err := e.service.GetNextPort(state.OrchestrationID)
@@ -184,28 +274,39 @@ func (e *Executor) HandleWorkerComplete(workerSessionID string, result WorkerPai
 	}
 
 	if result.Success {
-		// Mark port as complete
+		// Mark port as complete in both DB and graph
 		e.service.UpdatePortStatus(state.OrchestrationID, ws.PortID, "complete")
 		state.CompletedPorts = append(state.CompletedPorts, ws.PortID)
+
+		// Update graph - this will also return newly ready ports
+		if state.Graph != nil {
+			state.Graph.MarkComplete(ws.PortID)
+		}
 	} else {
 		// Check retry count
 		state.RetryCount[ws.PortID]++
 		if state.RetryCount[ws.PortID] >= e.config.MaxRetries {
 			e.service.UpdatePortStatus(state.OrchestrationID, ws.PortID, "failed")
 			state.FailedPorts = append(state.FailedPorts, ws.PortID)
+			if state.Graph != nil {
+				state.Graph.MarkFailed(ws.PortID)
+			}
 		} else {
 			// Reset to pending for retry
 			e.service.UpdatePortStatus(state.OrchestrationID, ws.PortID, "pending")
+			if state.Graph != nil {
+				state.Graph.Nodes[ws.PortID].Status = "pending"
+			}
 		}
 	}
 
-	// Process next ports
-	op, err := e.service.GetOrchestration(state.OrchestrationID)
-	if err != nil {
-		return err
+	// Check if orchestration is complete
+	if e.isOrchestrationComplete(state) {
+		return e.completeOrchestration(state)
 	}
 
-	return e.processNextPorts(state, op, "")
+	// Process next ready ports using graph
+	return e.processReadyPorts(state, "")
 }
 
 // HandleMessage handles incoming messages for orchestration
@@ -361,6 +462,37 @@ func (e *Executor) handleTaskBlocked(msg *message.Message) error {
 	return nil
 }
 
+// isOrchestrationComplete checks if all ports are complete or failed
+func (e *Executor) isOrchestrationComplete(state *ExecutionState) bool {
+	if state.Graph == nil {
+		return len(state.ActiveWorkers) == 0
+	}
+
+	stats, err := state.Graph.GetStats()
+	if err != nil {
+		return false
+	}
+
+	// Complete if no pending or running ports
+	return stats.PendingPorts == 0 && stats.RunningPorts == 0
+}
+
+// completeOrchestration marks the orchestration as complete
+func (e *Executor) completeOrchestration(state *ExecutionState) error {
+	status := StatusComplete
+	if len(state.FailedPorts) > 0 {
+		status = StatusFailed
+	}
+
+	state.Status = status
+	_, err := e.service.db.Exec(`
+		UPDATE orchestration_ports SET status = ?, completed_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, status, state.OrchestrationID)
+
+	return err
+}
+
 // GetState returns the execution state for an orchestration
 func (e *Executor) GetState(orchestrationID string) (*ExecutionState, error) {
 	state, ok := e.states[orchestrationID]
@@ -445,4 +577,46 @@ func (e *Executor) ExportState(orchestrationID string) (string, error) {
 	}
 
 	return string(data), nil
+}
+
+// GetGraphStats returns dependency graph statistics
+func (e *Executor) GetGraphStats(orchestrationID string) (*GraphStats, error) {
+	state, err := e.GetState(orchestrationID)
+	if err != nil {
+		return nil, err
+	}
+
+	if state.Graph == nil {
+		return nil, fmt.Errorf("의존성 그래프가 없습니다")
+	}
+
+	return state.Graph.GetStats()
+}
+
+// GetCriticalPath returns the critical path for an orchestration
+func (e *Executor) GetCriticalPath(orchestrationID string) ([]string, error) {
+	state, err := e.GetState(orchestrationID)
+	if err != nil {
+		return nil, err
+	}
+
+	if state.Graph == nil {
+		return nil, fmt.Errorf("의존성 그래프가 없습니다")
+	}
+
+	return state.Graph.GetCriticalPath(), nil
+}
+
+// GetExecutionLevels returns the topological levels for parallel execution
+func (e *Executor) GetExecutionLevels(orchestrationID string) ([][]string, error) {
+	state, err := e.GetState(orchestrationID)
+	if err != nil {
+		return nil, err
+	}
+
+	if state.Graph == nil {
+		return nil, fmt.Errorf("의존성 그래프가 없습니다")
+	}
+
+	return state.Graph.TopologicalLevels()
 }

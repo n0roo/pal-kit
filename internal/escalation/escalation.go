@@ -200,6 +200,10 @@ const (
 	TypeCompactWarning EscalationType = "compact_warning"
 	TypeDependencyLoop EscalationType = "dependency_loop"
 	TypeManualReview   EscalationType = "manual_review"
+	TypeTimeout        EscalationType = "timeout"          // 타임아웃
+	TypeConflict       EscalationType = "conflict"         // Worker 간 충돌
+	TypeQuality        EscalationType = "quality"          // 품질 기준 미달
+	TypeDependency     EscalationType = "dependency"       // 의존성 해결 불가
 )
 
 // Severity defines the severity of an escalation

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import {
   FileText, Search, RefreshCw, Database, Tag,
-  ChevronRight, X, Eye, Hash, Clock, List, FolderOpen
+  ChevronRight, X, Eye, Hash, Clock, List, FolderOpen, PanelLeftClose, PanelLeft
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { useDocuments, useProjects, type Document, type DocumentFilters } from '../hooks'
-import { MarkdownViewer, TocViewer } from '../components'
+import { useDocuments, useProjects, useDocumentTree, type Document, type DocumentFilters, type DocumentTreeNode } from '../hooks'
+import { MarkdownViewer, TocViewer, DocumentTree, DocumentBreadcrumb } from '../components'
 
 type TypeFilter = '' | 'port' | 'convention' | 'agent' | 'docs' | 'session' | 'adr'
 type StatusFilter = '' | 'active' | 'draft' | 'archived' | 'deprecated'
@@ -25,6 +25,12 @@ export default function Documents() {
   const [docContent, setDocContent] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [viewTab, setViewTab] = useState<ViewTab>('preview')
+
+  // Tree view state
+  const [currentPath, setCurrentPath] = useState('.')
+  const [showTreePanel, setShowTreePanel] = useState(true)
+  const [selectedTreeNode, setSelectedTreeNode] = useState<DocumentTreeNode | null>(null)
+  const { tree, loading: treeLoading, fetchTree } = useDocumentTree(currentPath, 4)
 
   // Debounced search
   useEffect(() => {
@@ -55,6 +61,25 @@ export default function Documents() {
     const result = await reindex()
     if (result) {
       console.log('Reindex result:', result)
+      // Refresh tree after reindex
+      fetchTree(currentPath)
+    }
+  }
+
+  // Tree navigation
+  const handleTreeNavigate = (path: string) => {
+    setCurrentPath(path)
+    fetchTree(path)
+  }
+
+  const handleTreeNodeSelect = (node: DocumentTreeNode) => {
+    setSelectedTreeNode(node)
+    if (node.type === 'file') {
+      // Find matching document and select it
+      const matchingDoc = documents.find(d => d.path.endsWith(node.path) || d.path === node.path)
+      if (matchingDoc) {
+        handleSelectDoc(matchingDoc)
+      }
     }
   }
 
@@ -107,50 +132,84 @@ export default function Documents() {
   }
 
   return (
-    <div className="h-full flex">
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="p-4 border-b border-dark-700">
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-semibold flex items-center gap-2">
-              <FileText size={24} className="text-blue-400" />
-              문서 관리
-            </h1>
-            <button
-              onClick={handleReindex}
-              disabled={indexing}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded-lg text-sm"
-            >
-              <Database size={16} className={indexing ? 'animate-pulse' : ''} />
-              {indexing ? '인덱싱 중...' : '다시 인덱싱'}
-            </button>
-          </div>
+    <div className="h-full flex flex-col">
+      {/* Breadcrumb bar */}
+      <div className="px-4 py-2 border-b border-dark-700 bg-dark-800/50 flex items-center gap-3">
+        <button
+          onClick={() => setShowTreePanel(!showTreePanel)}
+          className="p-1.5 hover:bg-dark-700 rounded text-dark-400 hover:text-dark-200"
+          title={showTreePanel ? '트리 숨기기' : '트리 보기'}
+        >
+          {showTreePanel ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
+        </button>
+        <DocumentBreadcrumb
+          path={currentPath}
+          onNavigate={handleTreeNavigate}
+        />
+      </div>
 
-          {/* Project selector + Stats */}
-          <div className="flex items-center gap-4 mb-4">
-            <div className="flex items-center gap-2">
-              <FolderOpen size={16} className="text-dark-400" />
-              <select
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-                className="px-3 py-1.5 bg-dark-800 border border-dark-600 rounded-lg text-sm min-w-[200px]"
+      <div className="flex-1 flex overflow-hidden">
+        {/* Tree panel */}
+        {showTreePanel && (
+          <div className="w-64 border-r border-dark-700 flex flex-col overflow-hidden bg-dark-800/30">
+            <div className="p-2 border-b border-dark-700">
+              <h3 className="text-xs font-medium text-dark-400 uppercase tracking-wide">파일 탐색기</h3>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <DocumentTree
+                tree={tree}
+                selectedPath={selectedTreeNode?.path || null}
+                onSelectNode={handleTreeNodeSelect}
+                onNavigate={handleTreeNavigate}
+                loading={treeLoading}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Main content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="p-4 border-b border-dark-700">
+            <div className="flex items-center justify-between mb-4">
+              <h1 className="text-xl font-semibold flex items-center gap-2">
+                <FileText size={24} className="text-blue-400" />
+                문서 관리
+              </h1>
+              <button
+                onClick={handleReindex}
+                disabled={indexing}
+                className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded-lg text-sm"
               >
-                <option value="">모든 프로젝트</option>
-                {projects.map(p => (
-                  <option key={p.root} value={p.root}>{p.name}</option>
-                ))}
-              </select>
+                <Database size={16} className={indexing ? 'animate-pulse' : ''} />
+                {indexing ? '인덱싱 중...' : '다시 인덱싱'}
+              </button>
             </div>
 
-            {stats && (
-              <div className="flex items-center gap-4 text-sm text-dark-400">
-                <span>{stats.total_docs} 문서</span>
-                <span>{(stats.total_tokens / 1000).toFixed(1)}K 토큰</span>
-                <span>{Object.keys(stats.by_type || {}).length} 타입</span>
+            {/* Project selector + Stats */}
+            <div className="flex items-center gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <FolderOpen size={16} className="text-dark-400" />
+                <select
+                  value={selectedProject}
+                  onChange={(e) => setSelectedProject(e.target.value)}
+                  className="px-3 py-1.5 bg-dark-800 border border-dark-600 rounded-lg text-sm min-w-[200px]"
+                >
+                  <option value="">모든 프로젝트</option>
+                  {projects.map(p => (
+                    <option key={p.root} value={p.root}>{p.name}</option>
+                  ))}
+                </select>
               </div>
-            )}
-          </div>
+
+              {stats && (
+                <div className="flex items-center gap-4 text-sm text-dark-400">
+                  <span>{stats.total_docs} 문서</span>
+                  <span>{(stats.total_tokens / 1000).toFixed(1)}K 토큰</span>
+                  <span>{Object.keys(stats.by_type || {}).length} 타입</span>
+                </div>
+              )}
+            </div>
 
           {/* Search */}
           <div className="relative mb-4">
@@ -414,6 +473,7 @@ export default function Documents() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

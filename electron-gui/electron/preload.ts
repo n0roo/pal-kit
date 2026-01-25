@@ -49,6 +49,13 @@ contextBridge.exposeInMainWorld('app', {
   getServerPort: (): Promise<number> => ipcRenderer.invoke('app:server-port'),
   isServerRunning: (): Promise<boolean> => ipcRenderer.invoke('app:server-running'),
   restartServer: (): Promise<boolean> => ipcRenderer.invoke('app:restart-server'),
+  // File explorer
+  selectFolder: (): Promise<{ path: string | null; canceled: boolean }> =>
+    ipcRenderer.invoke('app:select-folder'),
+  openInExplorer: (folderPath: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('app:open-in-explorer', folderPath),
+  showItemInFolder: (itemPath: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('app:show-item-in-folder', itemPath),
 })
 
 // Type declarations
@@ -71,6 +78,9 @@ declare global {
       getServerPort: () => Promise<number>
       isServerRunning: () => Promise<boolean>
       restartServer: () => Promise<boolean>
+      selectFolder: () => Promise<{ path: string | null; canceled: boolean }>
+      openInExplorer: (folderPath: string) => Promise<{ success: boolean; error?: string }>
+      showItemInFolder: (itemPath: string) => Promise<{ success: boolean }>
     }
   }
 }

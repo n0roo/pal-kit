@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   Activity, GitBranch, Users, Layers, TrendingUp, Clock,
   CheckCircle, XCircle, AlertCircle, RefreshCw, Server,
-  FolderPlus, FolderOpen, Settings, Trash2, Plus, X
+  FolderPlus, FolderOpen, Settings, Trash2, Plus, X, ExternalLink
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
@@ -72,6 +72,35 @@ export default function Dashboard({ status, events }: DashboardProps) {
   const handleRemoveProject = async (root: string) => {
     if (!confirm('프로젝트를 목록에서 제거하시겠습니까? (파일은 삭제되지 않습니다)')) return
     await removeProject(root)
+  }
+
+  // Check if running in Electron
+  const isElectron = typeof window !== 'undefined' && window.app?.selectFolder !== undefined
+
+  const handleSelectFolder = async () => {
+    if (!isElectron) {
+      alert('파일 탐색기는 데스크톱 앱에서만 사용 가능합니다')
+      return
+    }
+
+    const result = await window.app.selectFolder()
+    if (!result.canceled && result.path) {
+      setNewProjectPath(result.path)
+      // Auto-fill name from folder name
+      const folderName = result.path.split('/').pop() || result.path.split('\\').pop()
+      if (folderName && !newProjectName) {
+        setNewProjectName(folderName)
+      }
+    }
+  }
+
+  const handleOpenInExplorer = async (folderPath: string) => {
+    if (!isElectron) {
+      alert('파일 탐색기는 데스크톱 앱에서만 사용 가능합니다')
+      return
+    }
+
+    await window.app.openInExplorer(folderPath)
   }
 
   const isConnected = status !== null
@@ -224,16 +253,28 @@ export default function Dashboard({ status, events }: DashboardProps) {
                   ) : (
                     <span>-</span>
                   )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleRemoveProject(project.root)
-                    }}
-                    className="p-1 text-dark-500 hover:text-red-400 hover:bg-red-500/10 rounded"
-                    title="목록에서 제거"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleOpenInExplorer(project.root)
+                      }}
+                      className="p-1 text-dark-500 hover:text-blue-400 hover:bg-blue-500/10 rounded"
+                      title="탐색기에서 열기"
+                    >
+                      <ExternalLink size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemoveProject(project.root)
+                      }}
+                      className="p-1 text-dark-500 hover:text-red-400 hover:bg-red-500/10 rounded"
+                      title="목록에서 제거"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -362,13 +403,24 @@ export default function Dashboard({ status, events }: DashboardProps) {
             {/* Path input */}
             <div className="mb-4">
               <label className="block text-sm text-dark-300 mb-1">프로젝트 경로 *</label>
-              <input
-                type="text"
-                value={newProjectPath}
-                onChange={(e) => setNewProjectPath(e.target.value)}
-                placeholder="/path/to/project"
-                className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg focus:border-primary-500 focus:outline-none"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newProjectPath}
+                  onChange={(e) => setNewProjectPath(e.target.value)}
+                  placeholder="/path/to/project"
+                  className="flex-1 px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg focus:border-primary-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSelectFolder}
+                  className="px-3 py-2 bg-dark-600 hover:bg-dark-500 border border-dark-500 rounded-lg text-sm flex items-center gap-1.5"
+                  title="폴더 선택"
+                >
+                  <FolderOpen size={16} />
+                  찾아보기
+                </button>
+              </div>
             </div>
 
             {/* Name input */}

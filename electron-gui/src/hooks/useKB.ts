@@ -309,6 +309,41 @@ export function useKBDocuments() {
   }
 }
 
+// Section type
+export interface KBSection {
+  id: string
+  name: string
+  description: string
+  icon?: string
+}
+
+// Hook: KB Sections
+export function useKBSections() {
+  const [sections, setSections] = useState<KBSection[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const fetchSections = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/sections`)
+      if (!res.ok) throw new Error('Failed to fetch sections')
+      const data = await res.json()
+      setSections(data || [])
+    } catch (err) {
+      console.error('Sections fetch error:', err)
+      setSections([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchSections()
+  }, [fetchSections])
+
+  return { sections, loading, fetchSections }
+}
+
 // Hook: KB Tags (returns map of tag -> count)
 export function useKBTags() {
   const [tags, setTags] = useState<Record<string, number>>({})
@@ -346,6 +381,7 @@ export function useKB() {
   const toc = useKBToc()
   const documents = useKBDocuments()
   const tagsHook = useKBTags()
+  const sectionsHook = useKBSections()
 
   return {
     ...status,
@@ -367,6 +403,9 @@ export function useKB() {
     tagNames: tagsHook.tagNames,
     tagsLoading: tagsHook.loading,
     refreshTags: tagsHook.fetchTags,
+    sections: sectionsHook.sections,
+    sectionsLoading: sectionsHook.loading,
+    refreshSections: sectionsHook.fetchSections,
   }
 }
 

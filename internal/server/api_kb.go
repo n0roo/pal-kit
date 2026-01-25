@@ -31,6 +31,9 @@ func (s *Server) RegisterKBRoutes(mux *http.ServeMux) {
 
 	// Tags
 	mux.HandleFunc("/api/v2/kb/tags", s.withCORS(s.handleKBTags))
+
+	// Sections
+	mux.HandleFunc("/api/v2/kb/sections", s.withCORS(s.handleKBSections))
 }
 
 // getVaultPath returns the vault path from config or default
@@ -672,4 +675,51 @@ func (s *Server) handleKBTags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.jsonResponse(w, tags)
+}
+
+// ========================================
+// Sections Handler
+// ========================================
+
+func (s *Server) handleKBSections(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.errorResponse(w, 405, "Method not allowed")
+		return
+	}
+
+	// Return predefined KB sections
+	sections := []map[string]interface{}{
+		{
+			"id":          kb.SystemDir,
+			"name":        "시스템",
+			"description": "메타 문서 및 시스템 설정",
+			"icon":        "settings",
+		},
+		{
+			"id":          kb.DomainsDir,
+			"name":        "도메인",
+			"description": "도메인별 지식 문서",
+			"icon":        "folder",
+		},
+		{
+			"id":          kb.ProjectsDir,
+			"name":        "프로젝트",
+			"description": "프로젝트별 문서",
+			"icon":        "project",
+		},
+		{
+			"id":          kb.ReferencesDir,
+			"name":        "참조",
+			"description": "참조 문서",
+			"icon":        "book",
+		},
+		{
+			"id":          kb.ArchiveDir,
+			"name":        "아카이브",
+			"description": "아카이브된 문서",
+			"icon":        "archive",
+		},
+	}
+
+	s.jsonResponse(w, sections)
 }
