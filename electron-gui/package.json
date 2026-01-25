@@ -41,6 +41,7 @@
   "build": {
     "appId": "com.pal-kit.gui",
     "productName": "PAL Kit",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -48,23 +49,66 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "../pal",
-        "to": "pal"
-      }
-    ],
     "mac": {
-      "target": "dmg",
-      "icon": "assets/icon.icns"
+      "extraResources": [
+        {
+          "from": "../pal",
+          "to": "pal"
+        }
+      ],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     },
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "extraResources": [
+        {
+          "from": "../pal.exe",
+          "to": "pal.exe"
+        }
+      ],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
-      "target": "AppImage",
-      "icon": "assets/icon.png"
+      "extraResources": [
+        {
+          "from": "../pal",
+          "to": "pal"
+        }
+      ],
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Development",
+      "maintainer": "PAL Kit Team"
     }
   }
 }
