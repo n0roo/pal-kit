@@ -15,6 +15,7 @@ PAL Kit을 Claude와 더 밀접하게 통합하여, Claude가 프로젝트 컨�
 2. **Context 관리** - 컨텍스트 최적화 및 자동화
 3. **에이전트 워크플로우** - 멀티 에이전트 패턴 고도화
 4. **Knowledge Base 연동** - 지식 기반 컨텍스트 로딩
+5. **데이터 관리** - 백업, 복원, 임포트/엑스포트
 
 ---
 
@@ -440,6 +441,65 @@ Port 활성화 시:
 
 ---
 
+## Phase 5: 데이터 관리
+
+### 목표
+
+PAL Kit의 핵심 데이터에 대한 안정적인 관리:
+- 백업/복원으로 데이터 손실 방지
+- 임포트/엑스포트로 이관 용이성
+- 무결성 검사로 데이터 신뢰성
+
+### 5.1 백업 시스템
+
+**대상 데이터**:
+```
+.pal/
+├── pal.db              # SQLite (세션, 포트, 에이전트)
+├── analytics/          # DuckDB (통계, 색인)
+├── sessions/           # 세션 로그
+└── decisions/          # 결정 기록
+
+vault/                  # Knowledge Base
+├── .pal-kb/index.db    # KB 색인
+└── 문서들...
+```
+
+**작업 항목**:
+- [ ] `pal backup create` - 전체/선택적 백업
+- [ ] `pal backup restore` - 복원 (스키마 마이그레이션 포함)
+- [ ] `pal backup list` - 백업 목록
+- [ ] 자동 백업 스케줄링 (daily/weekly/on_session_end)
+
+### 5.2 임포트/엑스포트
+
+**엑스포트 형식**:
+- JSON, YAML, CSV 지원
+- 선택적 필드 내보내기
+
+**작업 항목**:
+- [ ] `pal export sessions/ports/agents/kb` - 데이터 내보내기
+- [ ] `pal import` - 데이터 가져오기 (병합/덮어쓰기 옵션)
+
+### 5.3 무결성 검사
+
+**작업 항목**:
+- [ ] `pal data check` - 전체 무결성 검사
+  - SQLite: PRAGMA integrity_check, foreign key 검사
+  - Vault: 깨진 링크, 누락 파일
+  - DuckDB: 색인 동기화 상태
+- [ ] `pal data repair` - 복구 시도
+
+### 5.4 GUI 통합
+
+**작업 항목**:
+- [ ] 데이터 관리 페이지 추가
+- [ ] 상태 모니터링 (크기, 건수, 마지막 백업)
+- [ ] 백업/복원 UI
+- [ ] 자동 백업 설정 UI
+
+---
+
 ## 구현 일정 (예상)
 
 | Phase | 작업 | 우선순위 | 복잡도 |
@@ -460,6 +520,10 @@ Port 활성화 시:
 | 4.2 | 컨텍스트 자동 로딩 | High | Medium |
 | 4.3 | ADR 참조 | Medium | Medium |
 | 4.4 | 프로젝트 동기화 | Medium | Medium |
+| 5.1 | 백업 시스템 | High | Medium |
+| 5.2 | 임포트/엑스포트 | Medium | Medium |
+| 5.3 | 무결성 검사 | Medium | Low |
+| 5.4 | GUI 데이터 관리 | Low | Medium |
 
 ---
 
@@ -480,6 +544,11 @@ Port 활성화 시:
 4. **Knowledge Base**
    - 검색 응답 시간 < 100ms
    - 관련 문서 적중률 85%+
+
+5. **데이터 관리**
+   - 백업/복원 성공률 100%
+   - 스키마 마이그레이션 자동 처리
+   - 무결성 검사 통과율 99%+
 
 ---
 
