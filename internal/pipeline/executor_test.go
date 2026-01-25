@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -83,21 +85,30 @@ func TestExecutor_Callback(t *testing.T) {
 	svc.AddPort("test-pipeline", "port-002", 0)
 
 	var results []ExecutionResult
-	
+	var mu sync.Mutex
+
 	executor := NewExecutor(svc, "test-pipeline", "/tmp")
 	executor.SetDryRun(true)
 	executor.SetVerbose(false)
 	executor.SetCallback(func(result ExecutionResult) {
+		mu.Lock()
 		results = append(results, result)
+		mu.Unlock()
 	})
 
 	executor.Execute()
 
-	if len(results) != 2 {
-		t.Errorf("콜백 호출 횟수 = %d, want 2", len(results))
+	mu.Lock()
+	resultLen := len(results)
+	resultsCopy := make([]ExecutionResult, len(results))
+	copy(resultsCopy, results)
+	mu.Unlock()
+
+	if resultLen != 2 {
+		t.Errorf("콜백 호출 횟수 = %d, want 2", resultLen)
 	}
 
-	for _, r := range results {
+	for _, r := range resultsCopy {
 		if !r.Success {
 			t.Errorf("포트 %s 실패", r.PortID)
 		}
@@ -146,22 +157,22 @@ func TestExecutor_ParallelExecution(t *testing.T) {
 	svc.AddPort("test-pipeline", "port-002", 0)
 	svc.AddPort("test-pipeline", "port-003", 0)
 
-	completedCount := 0
-	
+	var completedCount int32
+
 	executor := NewExecutor(svc, "test-pipeline", "/tmp")
 	executor.SetDryRun(true)
 	executor.SetVerbose(false)
 	executor.SetParallel(true) // 병렬 실행
 	executor.SetCallback(func(result ExecutionResult) {
-		completedCount++
+		atomic.AddInt32(&completedCount, 1)
 	})
 
 	start := time.Now()
 	executor.Execute()
 	duration := time.Since(start)
 
-	if completedCount != 3 {
-		t.Errorf("완료된 포트 수 = %d, want 3", completedCount)
+	if atomic.LoadInt32(&completedCount) != 3 {
+		t.Errorf("완료된 포트 수 = %d, want 3", atomic.LoadInt32(&completedCount))
 	}
 
 	// 병렬 실행이므로 순차 실행보다 빠를 것으로 예상
