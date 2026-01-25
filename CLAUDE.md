@@ -442,7 +442,7 @@ electron-gui/
 
 
 <!-- pal:context:start -->
-> 마지막 업데이트: 2026-01-26 00:34:10
+> 마지막 업데이트: 2026-01-26 01:07:33
 
 ### 활성 세션
 - **8dd76fd5**: -
@@ -452,12 +452,5 @@ electron-gui/
 
 ### 에스컬레이션
 - 없음
-
-### 빠른 명령어
-```bash
-pal context status         # 컨텍스트 예산 상태
-pal port list              # 포트 목록
-pal hook events            # 최근 이벤트
-```
 
 <!-- pal:context:end -->

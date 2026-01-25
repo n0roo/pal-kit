@@ -92,20 +92,14 @@ func (s *CheckpointService) CreateCheckpoint(sessionID string) (*Checkpoint, err
 		CreatedAt: time.Now(),
 	}
 
-	// Collect active port state
-	if err := s.collectPortState(cp); err != nil {
-		// Not critical, continue
-	}
+	// Collect active port state (non-critical, errors ignored)
+	_ = s.collectPortState(cp)
 
-	// Collect loaded documents
-	if err := s.collectLoadedDocs(cp); err != nil {
-		// Not critical, continue
-	}
+	// Collect loaded documents (non-critical, errors ignored)
+	_ = s.collectLoadedDocs(cp)
 
-	// Collect recent changes
-	if err := s.collectRecentChanges(cp); err != nil {
-		// Not critical, continue
-	}
+	// Collect recent changes (non-critical, errors ignored)
+	_ = s.collectRecentChanges(cp)
 
 	// Generate recovery prompt
 	cp.RecoveryPrompt = s.generateRecoveryPrompt(cp)

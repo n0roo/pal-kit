@@ -43,7 +43,7 @@ func TestStartHierarchicalBuild(t *testing.T) {
 		t.Fatalf("Failed to start build session: %v", err)
 	}
 
-	if session.Session.ID == "" {
+	if session.ID == "" {
 		t.Error("Session ID should not be empty")
 	}
 
@@ -55,8 +55,8 @@ func TestStartHierarchicalBuild(t *testing.T) {
 		t.Errorf("Expected depth 0, got %d", session.Depth)
 	}
 
-	if session.Path != session.Session.ID {
-		t.Errorf("Expected path '%s', got '%s'", session.Session.ID, session.Path)
+	if session.Path != session.ID {
+		t.Errorf("Expected path '%s', got '%s'", session.ID, session.Path)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestStartHierarchicalOperator(t *testing.T) {
 	operator, err := svc.StartHierarchical(HierarchyStartOptions{
 		Title:    "Operator",
 		Type:     TypeOperator,
-		ParentID: build.Session.ID,
+		ParentID: build.ID,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create operator: %v", err)
@@ -89,12 +89,12 @@ func TestStartHierarchicalOperator(t *testing.T) {
 		t.Errorf("Expected depth 1, got %d", operator.Depth)
 	}
 
-	if !operator.ParentID.Valid || operator.ParentID.String != build.Session.ID {
-		t.Errorf("Expected parent ID '%s'", build.Session.ID)
+	if !operator.ParentID.Valid || operator.ParentID.String != build.ID {
+		t.Errorf("Expected parent ID '%s'", build.ID)
 	}
 
-	if !operator.RootID.Valid || operator.RootID.String != build.Session.ID {
-		t.Errorf("Expected root ID '%s'", build.Session.ID)
+	if !operator.RootID.Valid || operator.RootID.String != build.ID {
+		t.Errorf("Expected root ID '%s'", build.ID)
 	}
 }
 
@@ -106,12 +106,12 @@ func TestStartHierarchicalWorker(t *testing.T) {
 
 	// Build -> Operator -> Worker
 	build, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Build", Type: TypeBuild})
-	operator, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Operator", Type: TypeOperator, ParentID: build.Session.ID})
+	operator, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Operator", Type: TypeOperator, ParentID: build.ID})
 
 	worker, err := svc.StartHierarchical(HierarchyStartOptions{
 		Title:    "Worker",
 		Type:     TypeWorker,
-		ParentID: operator.Session.ID,
+		ParentID: operator.ID,
 		PortID:   "port-001",
 	})
 	if err != nil {
@@ -123,8 +123,8 @@ func TestStartHierarchicalWorker(t *testing.T) {
 	}
 
 	// Root should still be build
-	if !worker.RootID.Valid || worker.RootID.String != build.Session.ID {
-		t.Errorf("Expected root ID '%s'", build.Session.ID)
+	if !worker.RootID.Valid || worker.RootID.String != build.ID {
+		t.Errorf("Expected root ID '%s'", build.ID)
 	}
 }
 
@@ -143,13 +143,13 @@ func TestGetHierarchical(t *testing.T) {
 	}
 
 	// Get by ID
-	session, err := svc.GetHierarchical(created.Session.ID)
+	session, err := svc.GetHierarchical(created.ID)
 	if err != nil {
 		t.Fatalf("Failed to get session: %v", err)
 	}
 
-	if session.Session.ID != created.Session.ID {
-		t.Errorf("Expected ID '%s', got '%s'", created.Session.ID, session.Session.ID)
+	if session.ID != created.ID {
+		t.Errorf("Expected ID '%s', got '%s'", created.ID, session.ID)
 	}
 
 	// Get non-existent
@@ -172,7 +172,7 @@ func TestHierarchyStartOptionsDefaults(t *testing.T) {
 	}
 
 	// Should have defaults
-	if session.Session.ID == "" {
+	if session.ID == "" {
 		t.Error("ID should be auto-generated")
 	}
 
@@ -206,9 +206,9 @@ func TestHierarchicalSessionDepthPath(t *testing.T) {
 
 	// Create deep hierarchy: build -> op -> worker -> test
 	build, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Build", Type: TypeBuild})
-	op, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Op", Type: TypeOperator, ParentID: build.Session.ID})
-	worker, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Worker", Type: TypeWorker, ParentID: op.Session.ID})
-	test, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Test", Type: TypeTest, ParentID: worker.Session.ID})
+	op, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Op", Type: TypeOperator, ParentID: build.ID})
+	worker, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Worker", Type: TypeWorker, ParentID: op.ID})
+	test, _ := svc.StartHierarchical(HierarchyStartOptions{Title: "Test", Type: TypeTest, ParentID: worker.ID})
 
 	// Check depths
 	if build.Depth != 0 {
@@ -225,7 +225,7 @@ func TestHierarchicalSessionDepthPath(t *testing.T) {
 	}
 
 	// All should have same root
-	if test.RootID.String != build.Session.ID {
-		t.Errorf("Test root = %s, want %s", test.RootID.String, build.Session.ID)
+	if test.RootID.String != build.ID {
+		t.Errorf("Test root = %s, want %s", test.RootID.String, build.ID)
 	}
 }

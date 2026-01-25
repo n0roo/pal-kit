@@ -13,6 +13,7 @@ func TestNewService(t *testing.T) {
 	svc := NewService("/tmp/test-project")
 	if svc == nil {
 		t.Fatal("expected service, got nil")
+		return // unreachable but silences staticcheck
 	}
 	if svc.projectRoot != "/tmp/test-project" {
 		t.Errorf("expected project root /tmp/test-project, got %s", svc.projectRoot)

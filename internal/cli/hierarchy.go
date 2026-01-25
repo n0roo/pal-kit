@@ -82,14 +82,14 @@ var hierListCmd = &cobra.Command{
 				attention = fmt.Sprintf("%.2f", s.AttentionScore.Float64)
 			}
 			title := ""
-			if s.Session.Title.Valid {
-				title = s.Session.Title.String
+			if s.Title.Valid {
+				title = s.Title.String
 			}
 			fmt.Printf("%s%-*s %-8s %-10s %-10s %s\n",
 				indent,
-				36-len(indent), truncate(s.Session.ID, 36-len(indent)),
+				36-len(indent), truncate(s.ID, 36-len(indent)),
 				s.Type,
-				s.Session.Status,
+				s.Status,
 				attention,
 				truncate(title, 30))
 		}
@@ -179,12 +179,12 @@ var hierBuildsCmd = &cobra.Command{
 				attention = fmt.Sprintf("%.2f", s.AttentionScore.Float64)
 			}
 			title := ""
-			if s.Session.Title.Valid {
-				title = s.Session.Title.String
+			if s.Title.Valid {
+				title = s.Title.String
 			}
 			fmt.Printf("%-36s %-10s %-10s %s\n",
-				truncate(s.Session.ID, 36),
-				s.Session.Status,
+				truncate(s.ID, 36),
+				s.Status,
 				attention,
 				truncate(title, 30))
 		}
@@ -202,10 +202,10 @@ func printSessionTree(node *session.SessionHierarchyNode, prefix string, isLast 
 
 	// Print current node
 	typeIcon := getTypeIcon(node.Session.Type)
-	statusIcon := getStatusIcon(node.Session.Session.Status)
+	statusIcon := getStatusIcon(node.Session.Status)
 	title := ""
-	if node.Session.Session.Title.Valid {
-		title = node.Session.Session.Title.String
+	if node.Session.Title.Valid {
+		title = node.Session.Title.String
 	}
 	attention := ""
 	if node.Session.AttentionScore.Valid {
@@ -220,7 +220,7 @@ func printSessionTree(node *session.SessionHierarchyNode, prefix string, isLast 
 	}
 
 	// Calculate new prefix for children
-	newPrefix := prefix
+	var newPrefix string
 	if prefix == "" {
 		newPrefix = ""
 	} else if isLast {

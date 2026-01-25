@@ -19,7 +19,6 @@ type Config struct {
 // Service handles Knowledge Base operations
 type Service struct {
 	vaultPath string
-	config    *Config
 }
 
 // NewService creates a new KB service

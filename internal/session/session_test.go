@@ -230,6 +230,7 @@ func TestGetTree(t *testing.T) {
 	}
 	if child1 == nil {
 		t.Fatal("child-1을 찾을 수 없음")
+		return // unreachable but silences staticcheck
 	}
 	if len(child1.Children) != 1 {
 		t.Errorf("child-1의 자식 수 = %d, want 1", len(child1.Children))

@@ -117,7 +117,7 @@ func getPortObjective(portSpec string) string {
 	var objective strings.Builder
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "## 목표") || strings.HasPrefix(line, "## 목표") {
+		if strings.HasPrefix(line, "## 목표") {
 			inObjective = true
 			continue
 		}

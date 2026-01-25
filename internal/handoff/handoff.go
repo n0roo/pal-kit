@@ -322,7 +322,6 @@ type Builder struct {
 	fromPortID string
 	toPortID   string
 	content    map[string]interface{}
-	tokenCount int
 }
 
 // NewBuilder creates a new handoff builder

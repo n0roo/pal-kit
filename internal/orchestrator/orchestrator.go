@@ -303,7 +303,7 @@ func (s *Service) SpawnWorkerPair(opts WorkerPairOptions) (*WorkerSession, error
 	})
 	if err != nil {
 		// Cleanup impl session on failure
-		s.sessionService.End(implSession.Session.ID)
+		s.sessionService.End(implSession.ID)
 		return nil, fmt.Errorf("Test 세션 생성 실패: %w", err)
 	}
 
@@ -314,7 +314,7 @@ func (s *Service) SpawnWorkerPair(opts WorkerPairOptions) (*WorkerSession, error
 			status, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, wsID, opts.OrchestrationID, opts.PortID, WorkerTypePair,
-		implSession.Session.ID, testSession.Session.ID, "running", now, now)
+		implSession.ID, testSession.ID, "running", now, now)
 
 	if err != nil {
 		return nil, fmt.Errorf("Worker 세션 기록 실패: %w", err)
@@ -325,8 +325,8 @@ func (s *Service) SpawnWorkerPair(opts WorkerPairOptions) (*WorkerSession, error
 		OrchestrationID: opts.OrchestrationID,
 		PortID:          opts.PortID,
 		WorkerType:      WorkerTypePair,
-		ImplSessionID:   implSession.Session.ID,
-		TestSessionID:   testSession.Session.ID,
+		ImplSessionID:   implSession.ID,
+		TestSessionID:   testSession.ID,
 		Status:          "running",
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -336,7 +336,7 @@ func (s *Service) SpawnWorkerPair(opts WorkerPairOptions) (*WorkerSession, error
 	if s.messageStore != nil {
 		s.messageStore.SendTaskAssign(
 			opts.OperatorSessionID,
-			implSession.Session.ID,
+			implSession.ID,
 			opts.PortID,
 			message.TaskAssignPayload{
 				PortID:      opts.PortID,
@@ -392,9 +392,9 @@ func (s *Service) SpawnSingleWorker(opts SingleWorkerOptions) (*WorkerSession, e
 	implSessionID := ""
 	testSessionID := ""
 	if opts.WorkerType == WorkerTypeTest {
-		testSessionID = workerSession.Session.ID
+		testSessionID = workerSession.ID
 	} else {
-		implSessionID = workerSession.Session.ID
+		implSessionID = workerSession.ID
 	}
 
 	// Create worker session record

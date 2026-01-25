@@ -336,13 +336,13 @@ func (s *Service) renderEntries(sb *strings.Builder, entries []*TOCEntry, indent
 			// Check if _index.md exists
 			indexPath := filepath.Join(basePath, entry.Path, "_index.md")
 			if _, err := os.Stat(indexPath); err == nil {
-				sb.WriteString(fmt.Sprintf("%s- 📁 [[%s/_index|%s]]\n", prefix, link, entry.Title))
+				fmt.Fprintf(sb, "%s- 📁 [[%s/_index|%s]]\n", prefix, link, entry.Title)
 			} else {
 				// Just render as text without link
-				sb.WriteString(fmt.Sprintf("%s- 📁 %s\n", prefix, entry.Title))
+				fmt.Fprintf(sb, "%s- 📁 %s\n", prefix, entry.Title)
 			}
 		} else {
-			sb.WriteString(fmt.Sprintf("%s- [[%s|%s]]\n", prefix, link, entry.Title))
+			fmt.Fprintf(sb, "%s- [[%s|%s]]\n", prefix, link, entry.Title)
 		}
 
 		// Render children

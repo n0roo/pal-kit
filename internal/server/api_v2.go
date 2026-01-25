@@ -520,9 +520,7 @@ func (s *Server) handleAgentsV2(w http.ResponseWriter, r *http.Request) {
 		// Add system agents if requested
 		if includeSystem {
 			systemAgents := s.getSystemAgents(agentType)
-			for _, sa := range systemAgents {
-				agents = append(agents, sa)
-			}
+			agents = append(agents, systemAgents...)
 		}
 
 		s.jsonResponse(w, agents)
@@ -957,7 +955,7 @@ func (s *Server) handleV2Status(w http.ResponseWriter, r *http.Request) {
 	if builds, err := sessionSvc.GetBuildSessions(false, 100); err == nil {
 		active := 0
 		for _, b := range builds {
-			if b.Session.Status == "running" {
+			if b.Status == "running" {
 				active++
 			}
 		}

@@ -2,7 +2,6 @@ package marker
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/n0roo/pal-kit/internal/db"
@@ -370,10 +369,7 @@ func scanMarkersFromRows(rows interface {
 		}
 		m.Generated = generated == 1
 
-		// 상대 경로 처리
-		if filepath.IsAbs(m.FilePath) {
-			// 그대로 유지
-		}
+		// 상대 경로는 그대로 유지 (절대 경로인 경우에도 변환 없음)
 
 		markers = append(markers, m)
 	}

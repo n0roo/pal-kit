@@ -76,25 +76,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: pal-linux-amd64
-          path: .
-          
+          path: ../
+
       - name: Download Go binary (macOS)
         if: matrix.os == 'macos-latest'
         uses: actions/download-artifact@v4
         with:
           name: pal-darwin-amd64
-          path: .
-          
+          path: ../
+
       - name: Download Go binary (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/download-artifact@v4
         with:
           name: pal-windows-amd64
-          path: .
-          
+          path: ../
+
       - name: Prepare binary
         run: |
-          mkdir -p ../
           if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
             mv ../pal-linux-amd64 ../pal
             chmod +x ../pal
@@ -110,7 +109,7 @@ jobs:
         run: npm ci
         
       - name: Build Electron app
-        run: npm run electron:build
+        run: npm run build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           

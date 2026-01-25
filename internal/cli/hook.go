@@ -37,8 +37,9 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// publishSSEEvent publishes an SSE event (safe to call even if server not running)
-func publishSSEEvent(event *events.Event) {
+// _publishSSEEvent publishes an SSE event (safe to call even if server not running)
+// nolint:unused // reserved for future SSE event publishing
+func _publishSSEEvent(event *events.Event) {
 	// Get the global publisher - it will create one if needed
 	publisher := events.GetPublisher()
 	publisher.Publish(event)
@@ -269,7 +270,6 @@ var hookEventCmd = &cobra.Command{
 	RunE: runHookEvent,
 }
 
-var hookEventType string
 var hookEventContext string
 
 var hookEventsCmd = &cobra.Command{
@@ -1403,10 +1403,8 @@ func runHookPortEnd(cmd *cobra.Command, args []string) error {
 
 	// 세션에 usage가 있으면 이 포트에 할당 (단순화: 포트 작업 중 발생한 것으로 간주)
 	// 더 정확한 추적은 port-start/port-end 사이의 transcript 분석 필요
-	if palSession != nil {
-		// 이미 세션에 수집된 usage 중 이 포트에 배분 (현재는 기록만)
-		// 실제 구현에서는 transcript 시간 범위 기반 분석 필요
-	}
+	// TODO: transcript 시간 범위 기반 분석 구현
+	_ = palSession // 향후 구현 예정
 
 	// RecordCompletion으로 포트 완료 기록 (상태, 시간, duration, usage)
 	if err := portSvc.RecordCompletion(portID, inputTokens, outputTokens, costUSD); err != nil {
@@ -2107,8 +2105,9 @@ func runHookTestFeedback(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// generateRecoveryPrompt creates a recovery prompt for Claude after compact
-func generateRecoveryPrompt(portID, progress string, pending, files, decisions []string) string {
+// _generateRecoveryPrompt creates a recovery prompt for Claude after compact
+// nolint:unused // reserved for future compact recovery feature
+func _generateRecoveryPrompt(portID, progress string, pending, files, decisions []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Compact 복구\n\n")

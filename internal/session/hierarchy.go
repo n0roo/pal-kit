@@ -84,12 +84,12 @@ func (s *Service) StartHierarchical(opts HierarchyStartOptions) (*HierarchicalSe
 		if parent.RootID.Valid {
 			rootID = parent.RootID.String
 		} else {
-			rootID = parent.Session.ID
+			rootID = parent.ID
 		}
 		if parent.Path != "" {
 			path = parent.Path + "/" + opts.ID
 		} else {
-			path = parent.Session.ID + "/" + opts.ID
+			path = parent.ID + "/" + opts.ID
 		}
 	} else {
 		// 루트 세션 (build)
@@ -138,16 +138,16 @@ func (s *Service) GetHierarchical(id string) (*HierarchicalSession, error) {
 		       claude_session_id, project_root, project_name, transcript_path, cwd
 		FROM sessions WHERE id = ?
 	`, id).Scan(
-		&sess.Session.ID, &sess.Session.PortID, &sess.Session.Title, &sess.Session.Status,
-		&sess.Session.StartedAt, &sess.Session.EndedAt, &sess.Session.JSONLPath,
-		&sess.Session.InputTokens, &sess.Session.OutputTokens, &sess.Session.CacheReadTokens,
-		&sess.Session.CacheCreateTokens, &sess.Session.CostUSD, &sess.Session.CompactCount,
-		&sess.Session.LastCompactAt,
+		&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+		&sess.StartedAt, &sess.EndedAt, &sess.JSONLPath,
+		&sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+		&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount,
+		&sess.LastCompactAt,
 		&sess.ParentID, &sess.RootID, &sess.Depth, &sess.Path, &sess.Type,
 		&sess.AgentID, &sess.AgentVersion, &sess.Substatus, &sess.AttentionScore,
 		&sess.TokenBudget, &sess.ContextSnapshot, &sess.CheckpointID, &sess.OutputSummary,
-		&sess.Session.ClaudeSessionID, &sess.Session.ProjectRoot, &sess.Session.ProjectName,
-		&sess.Session.TranscriptPath, &sess.Session.Cwd,
+		&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName,
+		&sess.TranscriptPath, &sess.Cwd,
 	)
 
 	if err == sql.ErrNoRows {
@@ -179,7 +179,7 @@ func (s *Service) GetSessionHierarchy(rootID string) (*SessionHierarchyNode, err
 func (s *Service) buildHierarchyTree(node *SessionHierarchyNode) error {
 	rows, err := s.db.Query(`
 		SELECT id FROM sessions WHERE parent_id = ? ORDER BY started_at
-	`, node.Session.Session.ID)
+	`, node.Session.ID)
 	if err != nil {
 		return err
 	}
@@ -266,16 +266,16 @@ func (s *Service) scanHierarchicalSessions(rows *sql.Rows) ([]*HierarchicalSessi
 	for rows.Next() {
 		var sess HierarchicalSession
 		err := rows.Scan(
-			&sess.Session.ID, &sess.Session.PortID, &sess.Session.Title, &sess.Session.Status,
-			&sess.Session.StartedAt, &sess.Session.EndedAt, &sess.Session.JSONLPath,
-			&sess.Session.InputTokens, &sess.Session.OutputTokens, &sess.Session.CacheReadTokens,
-			&sess.Session.CacheCreateTokens, &sess.Session.CostUSD, &sess.Session.CompactCount,
-			&sess.Session.LastCompactAt,
+			&sess.ID, &sess.PortID, &sess.Title, &sess.Status,
+			&sess.StartedAt, &sess.EndedAt, &sess.JSONLPath,
+			&sess.InputTokens, &sess.OutputTokens, &sess.CacheReadTokens,
+			&sess.CacheCreateTokens, &sess.CostUSD, &sess.CompactCount,
+			&sess.LastCompactAt,
 			&sess.ParentID, &sess.RootID, &sess.Depth, &sess.Path, &sess.Type,
 			&sess.AgentID, &sess.AgentVersion, &sess.Substatus, &sess.AttentionScore,
 			&sess.TokenBudget, &sess.ContextSnapshot, &sess.CheckpointID, &sess.OutputSummary,
-			&sess.Session.ClaudeSessionID, &sess.Session.ProjectRoot, &sess.Session.ProjectName,
-			&sess.Session.TranscriptPath, &sess.Session.Cwd,
+			&sess.ClaudeSessionID, &sess.ProjectRoot, &sess.ProjectName,
+			&sess.TranscriptPath, &sess.Cwd,
 		)
 		if err != nil {
 			continue

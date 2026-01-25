@@ -52,7 +52,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 	defer database.Close()
 
 	// Query projects from database
-	rows, err := database.DB.Query(`
+	rows, err := database.Query(`
 		SELECT
 			root, name, description, last_active,
 			session_count, total_tokens, created_at
@@ -112,7 +112,7 @@ func (s *Server) getProjectPortCounts(database *db.DB, root string) portCounts {
 	counts := portCounts{}
 
 	// Count total ports for this project (via sessions)
-	row := database.DB.QueryRow(`
+	row := database.QueryRow(`
 		SELECT COUNT(DISTINCT p.id)
 		FROM ports p
 		JOIN sessions s ON p.session_id = s.id
@@ -121,7 +121,7 @@ func (s *Server) getProjectPortCounts(database *db.DB, root string) portCounts {
 	row.Scan(&counts.total)
 
 	// Count active (running) ports
-	row = database.DB.QueryRow(`
+	row = database.QueryRow(`
 		SELECT COUNT(DISTINCT p.id)
 		FROM ports p
 		JOIN sessions s ON p.session_id = s.id
@@ -204,7 +204,7 @@ func (s *Server) removeProject(w http.ResponseWriter, r *http.Request, root stri
 	}
 	defer database.Close()
 
-	_, err = database.DB.Exec("DELETE FROM projects WHERE root = ?", root)
+	_, err = database.Exec("DELETE FROM projects WHERE root = ?", root)
 	if err != nil {
 		s.errorResponse(w, 500, err.Error())
 		return
@@ -252,7 +252,7 @@ func (s *Server) handleProjectImport(w http.ResponseWriter, r *http.Request) {
 	defer database.Close()
 
 	// Insert or update project
-	_, err = database.DB.Exec(`
+	_, err = database.Exec(`
 		INSERT INTO projects (root, name, last_active, created_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		ON CONFLICT(root) DO UPDATE SET
@@ -315,7 +315,7 @@ func (s *Server) handleProjectInit(w http.ResponseWriter, r *http.Request) {
 	defer database.Close()
 
 	// Insert or update project
-	_, err = database.DB.Exec(`
+	_, err = database.Exec(`
 		INSERT INTO projects (root, name, last_active, created_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		ON CONFLICT(root) DO UPDATE SET

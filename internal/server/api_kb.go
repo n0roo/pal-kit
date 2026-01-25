@@ -252,14 +252,16 @@ func parseTocEntries(content string, vaultPath string, section string) []map[str
 				// Count leading spaces/tabs for depth
 				indent := 0
 				for _, c := range line {
-					if c == ' ' {
+					switch c {
+					case ' ':
 						indent++
-					} else if c == '\t' {
+					case '\t':
 						indent += 2
-					} else {
-						break
+					default:
+						goto countDone
 					}
 				}
+			countDone:
 				depth := indent / 2
 
 				// Check if directory

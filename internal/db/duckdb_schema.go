@@ -1,7 +1,8 @@
 package db
 
 // DuckDB 테이블 스키마
-const duckDBSchemaTables = `
+// nolint:unused // schema reserved for DuckDB OLAP integration
+const _duckDBSchemaTables = `
 CREATE TABLE IF NOT EXISTS metadata (
     key VARCHAR PRIMARY KEY,
     value VARCHAR,

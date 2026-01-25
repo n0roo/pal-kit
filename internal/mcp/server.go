@@ -710,7 +710,7 @@ func (s *Server) toolSessionStart(args json.RawMessage) (interface{}, error) {
 	}
 
 	// Initialize attention tracking
-	s.attStore.Initialize(sess.Session.ID, params.PortID, params.TokenBudget)
+	s.attStore.Initialize(sess.ID, params.PortID, params.TokenBudget)
 
 	return sess, nil
 }

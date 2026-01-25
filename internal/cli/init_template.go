@@ -34,8 +34,9 @@ func installTemplates(projectRoot string, forceOverwrite bool) error {
 	return nil
 }
 
-// installTemplatesFromEmbedded is a fallback using embedded templates directly
-func installTemplatesFromEmbedded(projectRoot string, forceOverwrite bool) error {
+// _installTemplatesFromEmbedded is a fallback using embedded templates directly
+// nolint:unused // reserved for embedded template fallback
+func _installTemplatesFromEmbedded(projectRoot string, forceOverwrite bool) error {
 	count, err := agent.CountTemplates()
 	if err != nil {
 		return fmt.Errorf("템플릿 목록 조회 실패: %w", err)

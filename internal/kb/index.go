@@ -249,12 +249,13 @@ func (s *IndexService) UpdateIndex() (int, int, error) {
 			// Check if already indexed and up to date
 			var indexedAt string
 			err = s.db.QueryRow("SELECT indexed_at FROM documents WHERE path = ?", relPath).Scan(&indexedAt)
-			if err == sql.ErrNoRows {
+			switch err {
+			case sql.ErrNoRows:
 				// New document
 				if _, err := s.indexDocument(path); err == nil {
 					added++
 				}
-			} else if err == nil {
+			case nil:
 				// Check if modified
 				indexed, _ := time.Parse(time.RFC3339, indexedAt)
 				if info.ModTime().After(indexed) {
