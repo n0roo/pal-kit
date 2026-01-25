@@ -3,10 +3,14 @@ import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron/simple'
 import path from 'path'
 
+// Skip electron plugin in E2E/CI mode (web-only)
+const isWebOnly = process.env.VITE_WEB_ONLY === 'true'
+
 export default defineConfig({
   plugins: [
     react(),
-    electron({
+    // Only include electron plugin when not in web-only mode
+    ...(!isWebOnly ? [electron({
       main: {
         entry: 'electron/main.ts',
         vite: {
@@ -29,7 +33,7 @@ export default defineConfig({
           }
         }
       }
-    })
+    })] : [])
   ],
   resolve: {
     alias: {
