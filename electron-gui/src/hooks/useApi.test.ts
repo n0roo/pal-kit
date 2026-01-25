@@ -13,7 +13,8 @@ describe('useApi', () => {
       builds: { total: 10, active: 3 },
       agents: { total: 4 },
     }
-    window.pal.getStatus = vi.fn().mockResolvedValue({ data: mockStatus, error: null })
+    // useApi uses window.pal.request() internally
+    window.pal.request = vi.fn().mockResolvedValue({ data: mockStatus, error: null })
 
     const { result } = renderHook(() => useApi())
 
@@ -23,11 +24,11 @@ describe('useApi', () => {
 
     expect(result.current.status).toEqual(mockStatus)
     expect(result.current.error).toBeNull()
-    expect(window.pal.getStatus).toHaveBeenCalled()
+    expect(window.pal.request).toHaveBeenCalledWith('/status', undefined)
   })
 
   it('should handle error', async () => {
-    window.pal.getStatus = vi.fn().mockResolvedValue({ data: null, error: 'Connection failed' })
+    window.pal.request = vi.fn().mockResolvedValue({ data: null, error: 'Connection failed' })
 
     const { result } = renderHook(() => useApi())
 
@@ -46,7 +47,7 @@ describe('useOrchestrations', () => {
       { id: '1', title: 'Orch 1', status: 'running', progress_percent: 50 },
       { id: '2', title: 'Orch 2', status: 'complete', progress_percent: 100 },
     ]
-    window.pal.getOrchestrations = vi.fn().mockResolvedValue({ data: mockOrchestrations, error: null })
+    window.pal.request = vi.fn().mockResolvedValue({ data: mockOrchestrations, error: null })
 
     const { result } = renderHook(() => useOrchestrations())
 
@@ -59,7 +60,7 @@ describe('useOrchestrations', () => {
   })
 
   it('should return empty array on error', async () => {
-    window.pal.getOrchestrations = vi.fn().mockResolvedValue({ data: null, error: 'Error' })
+    window.pal.request = vi.fn().mockResolvedValue({ data: null, error: 'Error' })
 
     const { result } = renderHook(() => useOrchestrations())
 
@@ -77,7 +78,7 @@ describe('useAgents', () => {
       { id: 'agent-1', name: 'Worker 1', type: 'worker' },
       { id: 'agent-2', name: 'Operator 1', type: 'operator' },
     ]
-    window.pal.getAgents = vi.fn().mockResolvedValue({ data: mockAgents, error: null })
+    window.pal.request = vi.fn().mockResolvedValue({ data: mockAgents, error: null })
 
     const { result } = renderHook(() => useAgents())
 
@@ -111,7 +112,7 @@ describe('useApp', () => {
     const { result } = renderHook(() => useApp())
 
     const success = await result.current.restartServer()
-    
+
     expect(success).toBe(true)
     expect(window.app.restartServer).toHaveBeenCalled()
   })
