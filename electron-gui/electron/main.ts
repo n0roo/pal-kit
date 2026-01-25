@@ -40,24 +40,34 @@ async function findAvailablePort(startPort = 9000, endPort = 9999): Promise<numb
 
 function findPalBinary(): string | null {
   const projectRoot = path.resolve(__dirname, '../..')
-  
+  const isWindows = process.platform === 'win32'
+  const binaryName = isWindows ? 'pal.exe' : 'pal'
+
   const possiblePaths = [
+    // Development paths
+    path.join(projectRoot, binaryName),
     path.join(projectRoot, 'pal'),
+    // Production paths (packaged app)
+    path.join(process.resourcesPath || '', binaryName),
     path.join(process.resourcesPath || '', 'pal'),
   ]
 
   for (const p of possiblePaths) {
     try {
       if (fs.existsSync(p)) {
-        fs.accessSync(p, fs.constants.X_OK)
+        if (!isWindows) {
+          fs.accessSync(p, fs.constants.X_OK)
+        }
         console.log(`[Main] Found pal binary: ${p}`)
         return p
       }
     } catch { continue }
   }
 
+  // Fallback: check PATH
   try {
-    return execSync('which pal', { encoding: 'utf-8' }).trim()
+    const cmd = isWindows ? 'where pal' : 'which pal'
+    return execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0]
   } catch { return null }
 }
 
