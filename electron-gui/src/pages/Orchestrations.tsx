@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { GitBranch, Plus, RefreshCw, Filter } from 'lucide-react'
+import { GitBranch, Plus, RefreshCw, Filter, X } from 'lucide-react'
 import { useOrchestrations } from '../hooks'
 import { OrchestrationProgress } from '../components'
 import clsx from 'clsx'
@@ -7,10 +7,16 @@ import clsx from 'clsx'
 type StatusFilter = '' | 'running' | 'complete' | 'failed' | 'pending'
 
 export default function Orchestrations() {
-  const { orchestrations, loading, fetchOrchestrations, getStats } = useOrchestrations()
+  const { orchestrations, loading, fetchOrchestrations, getStats, createOrchestration } = useOrchestrations()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
   const [selectedOrch, setSelectedOrch] = useState<string | null>(null)
   const [stats, setStats] = useState<any>(null)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newPorts, setNewPorts] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const handleFilterChange = (status: StatusFilter) => {
     setStatusFilter(status)
@@ -21,6 +27,39 @@ export default function Orchestrations() {
     setSelectedOrch(id)
     const orchStats = await getStats(id)
     setStats(orchStats)
+  }
+
+  const handleCreate = async () => {
+    if (!newTitle.trim()) {
+      setCreateError('제목을 입력하세요')
+      return
+    }
+
+    setCreating(true)
+    setCreateError(null)
+
+    try {
+      // Parse ports from comma-separated string
+      const portIds = newPorts.split(',').map(p => p.trim()).filter(Boolean)
+      const ports = portIds.map((portId, i) => ({
+        port_id: portId,
+        order: i + 1,
+      }))
+
+      const result = await createOrchestration(newTitle.trim(), newDescription.trim(), ports)
+      if (result) {
+        setShowCreateDialog(false)
+        setNewTitle('')
+        setNewDescription('')
+        setNewPorts('')
+      } else {
+        setCreateError('생성에 실패했습니다')
+      }
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : '알 수 없는 오류')
+    } finally {
+      setCreating(false)
+    }
   }
 
   const filters: { label: string; value: StatusFilter }[] = [
@@ -48,7 +87,10 @@ export default function Orchestrations() {
             >
               <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm">
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              className="flex items-center gap-2 px-3 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg text-sm"
+            >
               <Plus size={16} />
               새 Orchestration
             </button>
@@ -122,6 +164,76 @@ export default function Orchestrations() {
             <div className="pt-3 border-t border-dark-700">
               <div className="text-sm text-dark-400 mb-2">Workers</div>
               <div className="text-2xl font-bold">{stats.total_workers}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Create Dialog */}
+      {showCreateDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-dark-800 border border-dark-700 rounded-lg p-6 w-[480px] max-w-[90vw]">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">새 Orchestration</h3>
+              <button onClick={() => { setShowCreateDialog(false); setCreateError(null) }} className="text-dark-400 hover:text-dark-200">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-dark-300 mb-1">제목 *</label>
+                <input
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="예: user-service-impl"
+                  className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-dark-300 mb-1">설명</label>
+                <input
+                  type="text"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="설명을 입력하세요"
+                  className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-dark-300 mb-1">포트 ID (쉼표 구분)</label>
+                <input
+                  type="text"
+                  value={newPorts}
+                  onChange={(e) => setNewPorts(e.target.value)}
+                  placeholder="예: port-001, port-002, port-003"
+                  className="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg focus:border-primary-500 focus:outline-none"
+                />
+              </div>
+
+              {createError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                  {createError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => { setShowCreateDialog(false); setCreateError(null) }}
+                className="px-4 py-2 text-dark-300 hover:text-dark-100"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={creating || !newTitle.trim()}
+                className="px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded-lg"
+              >
+                {creating ? '생성 중...' : '생성'}
+              </button>
             </div>
           </div>
         </div>

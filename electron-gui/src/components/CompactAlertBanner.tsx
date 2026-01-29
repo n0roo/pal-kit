@@ -14,7 +14,7 @@ export function CompactAlertBanner({
   onRecover, 
   onSplit, 
   onContinue,
-  apiBaseUrl = 'http://localhost:8080'
+  apiBaseUrl = 'http://localhost:9000'
 }: CompactAlertBannerProps) {
   const [visible, setVisible] = useState(false)
   const [compactData, setCompactData] = useState<{
@@ -167,7 +167,7 @@ interface ToastData {
 }
 
 export function AttentionToasts({ 
-  apiBaseUrl = 'http://localhost:8080',
+  apiBaseUrl = 'http://localhost:9000',
   maxToasts = 3
 }: AttentionToastProps) {
   const [toasts, setToasts] = useState<ToastData[]>([])

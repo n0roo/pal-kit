@@ -255,7 +255,7 @@ export function SessionHierarchyTree({
   onSelect, 
   selectedId,
   showAttention = true,
-  apiBaseUrl = 'http://localhost:8080'
+  apiBaseUrl = 'http://localhost:9000'
 }: SessionHierarchyTreeProps) {
   const [sessions, setSessions] = useState<SessionNodeData[]>(initialData)
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set())

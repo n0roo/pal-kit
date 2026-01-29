@@ -217,7 +217,22 @@ export function useOrchestrations() {
     fetchOrchestrations()
   }, [fetchOrchestrations])
 
-  return { orchestrations, loading, fetchOrchestrations, getOrchestration, getStats }
+  const createOrchestration = useCallback(async (title: string, description: string, ports: { port_id: string; order: number; depends_on?: string[] }[]): Promise<Orchestration | null> => {
+    try {
+      const res = await apiRequest<Orchestration>('/orchestrations', {
+        method: 'POST',
+        body: { title, description, ports },
+      })
+      if (res.data) {
+        await fetchOrchestrations()
+      }
+      return res.data
+    } catch {
+      return null
+    }
+  }, [fetchOrchestrations])
+
+  return { orchestrations, loading, fetchOrchestrations, getOrchestration, getStats, createOrchestration }
 }
 
 export function useAgents() {
@@ -672,7 +687,7 @@ export function useDocumentTree(root: string = '.', depth: number = 3) {
         setError(res.error)
         setTree(null)
       } else {
-        setTree(res as DocumentTreeNode)
+        setTree(res.data as DocumentTreeNode)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch tree')

@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
 
-const API_BASE = 'http://localhost:9000/api/v2/projects'
+const API_PATH = '/api/v2/projects'
+
+// Check if running in Electron
+const isElectron = () => typeof window !== 'undefined' && window.pal !== undefined
+
+// Resolve API URL for fetch (handles Electron dynamic port)
+async function resolveUrl(path: string): Promise<string> {
+  if (isElectron() && window.app?.getServerPort) {
+    const port = await window.app.getServerPort()
+    if (port && port > 0) {
+      return `http://localhost:${port}${path}`
+    }
+  }
+  return path
+}
 
 export interface Project {
   root: string
@@ -24,7 +38,8 @@ export function useProjects() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(API_BASE)
+      const url = await resolveUrl(API_PATH)
+      const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to fetch projects')
       const data = await res.json()
       setProjects(data || [])
@@ -42,7 +57,8 @@ export function useProjects() {
 
   const importProject = useCallback(async (path: string, name?: string): Promise<Project | null> => {
     try {
-      const res = await fetch(`${API_BASE}/import`, {
+      const url = await resolveUrl(`${API_PATH}/import`)
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, name }),
@@ -61,7 +77,8 @@ export function useProjects() {
 
   const initProject = useCallback(async (path: string, name?: string): Promise<Project | null> => {
     try {
-      const res = await fetch(`${API_BASE}/init`, {
+      const url = await resolveUrl(`${API_PATH}/init`)
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, name }),
@@ -80,7 +97,8 @@ export function useProjects() {
 
   const removeProject = useCallback(async (root: string): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE}/${encodeURIComponent(root)}`, {
+      const url = await resolveUrl(`${API_PATH}/${encodeURIComponent(root)}`)
+      const res = await fetch(url, {
         method: 'DELETE',
       })
       if (!res.ok) throw new Error('Failed to remove project')
@@ -94,7 +112,8 @@ export function useProjects() {
 
   const getProject = useCallback(async (root: string): Promise<Project | null> => {
     try {
-      const res = await fetch(`${API_BASE}/${encodeURIComponent(root)}`)
+      const url = await resolveUrl(`${API_PATH}/${encodeURIComponent(root)}`)
+      const res = await fetch(url)
       if (!res.ok) return null
       return await res.json()
     } catch {

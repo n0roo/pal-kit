@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
 
-const API_BASE = 'http://localhost:9000/api/v2/kb'
+const API_PATH = '/api/v2/kb'
+
+// Check if running in Electron
+const isElectron = () => typeof window !== 'undefined' && window.pal !== undefined
+
+// Resolve API URL for fetch (handles Electron dynamic port)
+async function resolveUrl(path: string): Promise<string> {
+  if (isElectron() && window.app?.getServerPort) {
+    const port = await window.app.getServerPort()
+    if (port && port > 0) {
+      return `http://localhost:${port}${path}`
+    }
+  }
+  return path
+}
 
 // Types
 export interface KBStatus {
@@ -68,7 +82,7 @@ export function useKBStatus() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/status`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/status`)
       if (!res.ok) throw new Error('Failed to fetch KB status')
       const data = await res.json()
       setStatus(data)
@@ -85,7 +99,7 @@ export function useKBStatus() {
 
   const initialize = useCallback(async (force = false) => {
     try {
-      const res = await fetch(`${API_BASE}/init`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/init`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force }),
@@ -101,7 +115,7 @@ export function useKBStatus() {
 
   const rebuildIndex = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/index`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/index`, {
         method: 'POST',
       })
       if (!res.ok) throw new Error('Failed to rebuild index')
@@ -124,7 +138,7 @@ export function useKBToc() {
   const fetchToc = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/toc`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/toc`)
       if (!res.ok) throw new Error('Failed to fetch TOC')
       const data = await res.json()
       setToc(data)
@@ -141,7 +155,7 @@ export function useKBToc() {
 
   const getSectionToc = useCallback(async (section: string): Promise<KBTocEntry[]> => {
     try {
-      const res = await fetch(`${API_BASE}/toc/${encodeURIComponent(section)}`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/toc/${encodeURIComponent(section)}`)
       if (!res.ok) return []
       const data = await res.json()
       // Backend returns { section, content, entries: [...] }
@@ -153,7 +167,7 @@ export function useKBToc() {
 
   const generateToc = useCallback(async (section: string, depth = 3, sortBy = 'alphabetical') => {
     try {
-      const res = await fetch(`${API_BASE}/toc/${encodeURIComponent(section)}/generate`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/toc/${encodeURIComponent(section)}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ depth, sort_by: sortBy }),
@@ -205,7 +219,7 @@ export function useKBDocuments() {
       if (params.limit) searchParams.set('limit', String(params.limit))
       if (params.tags?.length) searchParams.set('tag', params.tags[0])  // Backend uses 'tag'
 
-      const res = await fetch(`${API_BASE}/documents?${searchParams}`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/documents?${searchParams}`)
       if (!res.ok) throw new Error('Failed to search documents')
       const results: SearchResult[] = await res.json()
 
@@ -234,7 +248,7 @@ export function useKBDocuments() {
 
   const getDocument = useCallback(async (id: string): Promise<KBDocumentDetail | null> => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(id)}`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/documents/${encodeURIComponent(id)}`)
       if (!res.ok) return null
       return await res.json()
     } catch {
@@ -244,7 +258,7 @@ export function useKBDocuments() {
 
   const createDocument = useCallback(async (doc: Partial<KBDocumentDetail>) => {
     try {
-      const res = await fetch(`${API_BASE}/documents`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/documents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(doc),
@@ -259,7 +273,7 @@ export function useKBDocuments() {
 
   const updateDocument = useCallback(async (id: string, doc: Partial<KBDocumentDetail>) => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/documents/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(doc),
@@ -274,7 +288,7 @@ export function useKBDocuments() {
 
   const deleteDocument = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/documents/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       })
       return res.ok
@@ -285,7 +299,7 @@ export function useKBDocuments() {
 
   const moveDocument = useCallback(async (id: string, targetPath: string) => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(id)}/move`, {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/documents/${encodeURIComponent(id)}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target_path: targetPath }),
@@ -325,7 +339,7 @@ export function useKBSections() {
   const fetchSections = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/sections`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/sections`)
       if (!res.ok) throw new Error('Failed to fetch sections')
       const data = await res.json()
       setSections(data || [])
@@ -352,7 +366,7 @@ export function useKBTags() {
   const fetchTags = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/tags`)
+      const res = await fetch(`${await resolveUrl(API_PATH)}/tags`)
       if (!res.ok) throw new Error('Failed to fetch tags')
       const data = await res.json()
       // Backend returns map[string]int directly

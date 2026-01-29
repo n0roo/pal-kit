@@ -112,7 +112,7 @@ export interface UseSSEResult {
 }
 
 const DEFAULT_BASE_URL = typeof window !== 'undefined' && window.location ? 
-  `${window.location.protocol}//${window.location.host}` : 'http://localhost:8080'
+  `${window.location.protocol}//${window.location.host}` : 'http://localhost:9000'
 const DEFAULT_MAX_EVENTS = 100
 const DEFAULT_RECONNECT_DELAY = 3000
 
@@ -184,9 +184,14 @@ export function useSSE(options: UseSSEOptions = {}): UseSSEResult {
           }
         }
         
-        // Production web: use current location
-        console.log('[SSE] Using fallback URL:', DEFAULT_BASE_URL)
-        setResolvedBaseUrl(DEFAULT_BASE_URL)
+        // Production web: use current location (skip file:// protocol in Electron)
+        if (DEFAULT_BASE_URL.startsWith('file://')) {
+          console.log('[SSE] Electron file:// protocol detected, using localhost:9000 fallback')
+          setResolvedBaseUrl('http://localhost:9000')
+        } else {
+          console.log('[SSE] Using fallback URL:', DEFAULT_BASE_URL)
+          setResolvedBaseUrl(DEFAULT_BASE_URL)
+        }
       } catch (e) {
         console.warn('[SSE] Failed to resolve URL:', e)
         setResolvedBaseUrl(import.meta.env.DEV ? '' : DEFAULT_BASE_URL)
