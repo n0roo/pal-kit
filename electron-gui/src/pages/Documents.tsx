@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'
 import {
   FileText, Search, RefreshCw, Database, Tag,
   ChevronRight, X, Eye, Hash, Clock, List, PanelLeftClose, PanelLeft,
-  Plus, Pencil, Trash2, Save
+  Plus, Pencil, Trash2, Save, BookOpen
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { useDocuments, useDocumentTree, type Document, type DocumentFilters, type DocumentTreeNode } from '../hooks'
 import { MarkdownViewer, TocViewer, DocumentTree } from '../components'
+import { KBRegisterDialog } from '../components/kb'
 
 type TypeFilter = '' | 'port' | 'convention' | 'agent' | 'docs' | 'session' | 'adr'
 type StatusFilter = '' | 'active' | 'draft' | 'archived' | 'deprecated'
@@ -131,6 +132,9 @@ export default function Documents() {
   const [createType, setCreateType] = useState<string>('port')
   const [createName, setCreateName] = useState('')
   const [creating, setCreating] = useState(false)
+
+  // KB register dialog
+  const [showKBRegister, setShowKBRegister] = useState(false)
 
   // Debounced search
   useEffect(() => {
@@ -601,6 +605,13 @@ export default function Documents() {
                   ) : (
                     <>
                       <button
+                        onClick={() => setShowKBRegister(true)}
+                        className="p-1.5 text-dark-400 hover:text-primary-400 hover:bg-dark-700 rounded"
+                        title="KB에 등록"
+                      >
+                        <BookOpen size={14} />
+                      </button>
+                      <button
                         onClick={handleStartEdit}
                         className="p-1.5 text-dark-400 hover:text-blue-400 hover:bg-dark-700 rounded"
                         title="편집"
@@ -723,7 +734,7 @@ export default function Documents() {
               ) : docContent ? (
                 viewTab === 'preview' ? (
                   <div className="bg-dark-800 rounded-lg p-4 overflow-auto h-full">
-                    <MarkdownViewer content={docContent} />
+                    <MarkdownViewer content={docContent} fileName={selectedDoc.path} />
                   </div>
                 ) : (
                   <div className="bg-dark-800 rounded-lg p-4">
@@ -746,6 +757,19 @@ export default function Documents() {
           </div>
         )}
       </div>
+
+      {/* KB Register Dialog */}
+      {showKBRegister && selectedDoc && (
+        <KBRegisterDialog
+          documentPath={selectedDoc.path}
+          documentId={selectedDoc.id}
+          onClose={() => setShowKBRegister(false)}
+          onSuccess={() => {
+            showMsg('success', 'KB에 등록되었습니다')
+            setShowKBRegister(false)
+          }}
+        />
+      )}
     </div>
   )
 }

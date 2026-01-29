@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   BookOpen, RefreshCw, Database, Search, X,
   AlertCircle, CheckCircle, ChevronRight, FileText,
-  Plus
+  Plus, Globe, ListTree
 } from 'lucide-react'
 import clsx from 'clsx'
 import {
@@ -13,7 +13,7 @@ import {
   type KBDocument,
   type KBDocumentDetail,
 } from '../hooks/useKB'
-import { KBDocumentEditor, KBMoveDialog } from '../components'
+import { KBDocumentEditor, KBMoveDialog, KBExternalDialog } from '../components'
 
 // KB Sections
 const KB_SECTIONS = [
@@ -27,7 +27,7 @@ const KB_SECTIONS = [
 export default function KnowledgeBase() {
   // Hooks
   const { status, loading: statusLoading, fetchStatus, initialize, rebuildIndex } = useKBStatus()
-  const { toc, loading: tocLoading, getSectionToc, fetchToc } = useKBToc()
+  const { toc, loading: tocLoading, getSectionToc, generateToc, fetchToc } = useKBToc()
   const {
     documents, loading: docsLoading, search,
     getDocument, createDocument, updateDocument, deleteDocument, moveDocument,
@@ -44,7 +44,12 @@ export default function KnowledgeBase() {
   // Editor & dialogs
   const [isCreatingNew, setIsCreatingNew] = useState(false)
   const [showMoveDialog, setShowMoveDialog] = useState(false)
+  const [showExternalDialog, setShowExternalDialog] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [generatingToc, setGeneratingToc] = useState(false)
+  const [tocDepth, setTocDepth] = useState(3)
+  const [tocSort, setTocSort] = useState('alphabetical')
+  const [showTocOptions, setShowTocOptions] = useState(false)
 
   // Load section TOC when section changes
   useEffect(() => {
@@ -193,6 +198,29 @@ export default function KnowledgeBase() {
     }
   }
 
+  // Handle TOC generation
+  const handleGenerateToc = async () => {
+    setGeneratingToc(true)
+    const success = await generateToc(selectedSection, tocDepth, tocSort)
+    setGeneratingToc(false)
+    setShowTocOptions(false)
+    if (success) {
+      showMessage('success', `${selectedSection} TOC가 생성되었습니다`)
+      loadSectionToc(selectedSection)
+    } else {
+      showMessage('error', 'TOC 생성에 실패했습니다')
+    }
+  }
+
+  // Get section TOC status indicator
+  const getSectionStatus = (sectionId: string) => {
+    const tocItem = toc.find(t => t.section === sectionId)
+    if (!tocItem || !tocItem.exists) return 'missing'
+    if (tocItem.needs_refresh) return 'needs_refresh'
+    if (tocItem.valid) return 'valid'
+    return 'needs_refresh'
+  }
+
   // Handle rebuild index
   const handleRebuildIndex = async () => {
     const success = await rebuildIndex()
@@ -307,6 +335,14 @@ export default function KnowledgeBase() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowExternalDialog(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm"
+              title="외부 문서 등록"
+            >
+              <Globe size={14} />
+              외부 등록
+            </button>
+            <button
               onClick={handleStartCreate}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded-lg text-sm"
             >
@@ -362,23 +398,91 @@ export default function KnowledgeBase() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left column: Sections + TOC + Search */}
         <div className="w-80 border-r border-dark-700 flex flex-col">
-          {/* Section tabs */}
+          {/* Section tabs with status */}
           <div className="flex border-b border-dark-700 overflow-x-auto">
-            {KB_SECTIONS.map(section => (
+            {KB_SECTIONS.map(section => {
+              const sectionStatus = getSectionStatus(section.id)
+              return (
+                <button
+                  key={section.id}
+                  onClick={() => setSelectedSection(section.id)}
+                  className={clsx(
+                    'px-3 py-2 text-xs whitespace-nowrap border-b-2 transition-colors flex items-center gap-1',
+                    selectedSection === section.id
+                      ? 'border-primary-500 text-primary-400 bg-dark-800'
+                      : 'border-transparent text-dark-400 hover:text-dark-200'
+                  )}
+                >
+                  <span className="mr-0.5">{section.icon}</span>
+                  {section.label}
+                  <span
+                    className={clsx(
+                      'w-1.5 h-1.5 rounded-full ml-1',
+                      sectionStatus === 'valid' && 'bg-green-400',
+                      sectionStatus === 'needs_refresh' && 'bg-yellow-400',
+                      sectionStatus === 'missing' && 'bg-red-400'
+                    )}
+                    title={
+                      sectionStatus === 'valid' ? 'TOC 유효' :
+                      sectionStatus === 'needs_refresh' ? '갱신 필요' :
+                      'TOC 없음'
+                    }
+                  />
+                </button>
+              )
+            })}
+          </div>
+
+          {/* TOC generation controls */}
+          <div className="px-2 py-1.5 border-b border-dark-700 flex items-center justify-between">
+            <span className="text-xs text-dark-500">{selectedSection}</span>
+            <div className="relative">
               <button
-                key={section.id}
-                onClick={() => setSelectedSection(section.id)}
-                className={clsx(
-                  'px-3 py-2 text-xs whitespace-nowrap border-b-2 transition-colors',
-                  selectedSection === section.id
-                    ? 'border-primary-500 text-primary-400 bg-dark-800'
-                    : 'border-transparent text-dark-400 hover:text-dark-200'
-                )}
+                onClick={() => setShowTocOptions(!showTocOptions)}
+                disabled={generatingToc}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-dark-400 hover:text-dark-200 hover:bg-dark-700 rounded"
               >
-                <span className="mr-1">{section.icon}</span>
-                {section.label}
+                <ListTree size={12} />
+                {generatingToc ? 'TOC 생성 중...' : 'TOC 생성'}
               </button>
-            ))}
+
+              {showTocOptions && (
+                <div className="absolute right-0 top-full mt-1 bg-dark-800 border border-dark-600 rounded-lg p-3 shadow-xl z-10 w-48">
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-dark-400">Depth</label>
+                      <select
+                        value={tocDepth}
+                        onChange={(e) => setTocDepth(Number(e.target.value))}
+                        className="w-full mt-1 px-2 py-1 bg-dark-900 border border-dark-600 rounded text-xs"
+                      >
+                        {[1, 2, 3, 4, 5].map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-dark-400">Sort</label>
+                      <select
+                        value={tocSort}
+                        onChange={(e) => setTocSort(e.target.value)}
+                        className="w-full mt-1 px-2 py-1 bg-dark-900 border border-dark-600 rounded text-xs"
+                      >
+                        <option value="alphabetical">알파벳순</option>
+                        <option value="date">날짜순</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={handleGenerateToc}
+                      disabled={generatingToc}
+                      className="w-full px-2 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded text-xs"
+                    >
+                      생성
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Search */}
@@ -485,6 +589,19 @@ export default function KnowledgeBase() {
           sections={toc}
           onMove={handleMove}
           onClose={() => setShowMoveDialog(false)}
+        />
+      )}
+
+      {/* External document register dialog */}
+      {showExternalDialog && (
+        <KBExternalDialog
+          onClose={() => setShowExternalDialog(false)}
+          onSuccess={() => {
+            showMessage('success', '외부 문서가 등록되었습니다')
+            setShowExternalDialog(false)
+            loadSectionToc(selectedSection)
+            search({ section: selectedSection, limit: 100 })
+          }}
         />
       )}
     </div>

@@ -72,6 +72,13 @@ export interface KBSearchParams {
   limit?: number
 }
 
+export interface KBRegisterResult {
+  status: 'registered' | 'duplicate' | 'error'
+  kb_path: string
+  existing_path?: string
+  message: string
+}
+
 // Hook: KB Status
 export function useKBStatus() {
   const [status, setStatus] = useState<KBStatus | null>(null)
@@ -310,6 +317,55 @@ export function useKBDocuments() {
     }
   }, [])
 
+  const registerFromProject = useCallback(async (
+    sourcePath: string,
+    targetSection: string,
+    targetPath?: string
+  ): Promise<KBRegisterResult | null> => {
+    try {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_path: sourcePath,
+          target_section: targetSection,
+          target_path: targetPath,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to register document')
+      return await res.json()
+    } catch (err) {
+      console.error('Register document error:', err)
+      return null
+    }
+  }, [])
+
+  const registerExternal = useCallback(async (
+    title: string,
+    content: string,
+    targetSection: string,
+    metadata?: { type?: string; tags?: string[] }
+  ): Promise<KBRegisterResult | null> => {
+    try {
+      const res = await fetch(`${await resolveUrl(API_PATH)}/register/external`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          content,
+          target_section: targetSection,
+          type: metadata?.type || '',
+          tags: metadata?.tags || [],
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to register external document')
+      return await res.json()
+    } catch (err) {
+      console.error('Register external document error:', err)
+      return null
+    }
+  }, [])
+
   return {
     documents,
     loading,
@@ -320,6 +376,8 @@ export function useKBDocuments() {
     updateDocument,
     deleteDocument,
     moveDocument,
+    registerFromProject,
+    registerExternal,
   }
 }
 
@@ -413,6 +471,8 @@ export function useKB() {
     updateDocument: documents.updateDocument,
     deleteDocument: documents.deleteDocument,
     moveDocument: documents.moveDocument,
+    registerFromProject: documents.registerFromProject,
+    registerExternal: documents.registerExternal,
     tags: tagsHook.tags,
     tagNames: tagsHook.tagNames,
     tagsLoading: tagsHook.loading,

@@ -12,6 +12,7 @@ interface MarkdownViewerProps {
   content: string
   className?: string
   showToc?: boolean
+  fileName?: string
 }
 
 // Extract ToC from markdown content
@@ -28,6 +29,67 @@ function extractToc(content: string): TocItem[] {
   }
   
   return toc
+}
+
+// Detect if content is pure YAML (not markdown with frontmatter)
+function isYamlFile(content: string, fileName?: string): boolean {
+  if (fileName) {
+    const ext = fileName.split('.').pop()?.toLowerCase()
+    if (ext === 'yaml' || ext === 'yml') return true
+  }
+  // Heuristic: if content starts with a YAML key (not ---) and has no markdown headings
+  if (!content.startsWith('---') && /^\w[\w-]*\s*:/m.test(content) && !/^#{1,6}\s/m.test(content)) {
+    return true
+  }
+  return false
+}
+
+// Render YAML with syntax highlighting
+function yamlToHtml(content: string): string {
+  const escaped = content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  const highlighted = escaped
+    .split('\n')
+    .map(line => {
+      // Comments
+      if (/^\s*#/.test(line)) {
+        return `<span class="text-dark-500 italic">${line}</span>`
+      }
+      // Key-value pairs
+      return line.replace(
+        /^(\s*)([\w][\w.-]*)(\s*:\s*)(.*)/,
+        (_, indent, key, sep, value) => {
+          let styledValue = value
+          // Boolean / null
+          if (/^(true|false|null|~)$/i.test(value.trim())) {
+            styledValue = `<span class="text-orange-400">${value}</span>`
+          }
+          // Numbers
+          else if (/^-?\d+(\.\d+)?$/.test(value.trim())) {
+            styledValue = `<span class="text-green-400">${value}</span>`
+          }
+          // Quoted strings
+          else if (/^["']/.test(value.trim())) {
+            styledValue = `<span class="text-yellow-300">${value}</span>`
+          }
+          // Arrays inline [...]
+          else if (/^\[/.test(value.trim())) {
+            styledValue = `<span class="text-yellow-300">${value}</span>`
+          }
+          // Plain string values
+          else if (value.trim()) {
+            styledValue = `<span class="text-yellow-400">${value}</span>`
+          }
+          return `${indent}<span class="text-blue-400">${key}</span><span class="text-dark-400">${sep}</span>${styledValue}`
+        }
+      )
+    })
+    .join('\n')
+
+  return `<div class="bg-dark-900 rounded-lg p-4 border border-dark-600"><div class="text-xs text-dark-400 mb-2 flex items-center gap-1.5">YAML</div><pre class="text-sm font-mono leading-relaxed overflow-x-auto">${highlighted}</pre></div>`
 }
 
 // Simple markdown to HTML conversion
@@ -99,11 +161,12 @@ function markdownToHtml(content: string): string {
   return html
 }
 
-export default function MarkdownViewer({ content, className = '', showToc = false }: MarkdownViewerProps) {
+export default function MarkdownViewer({ content, className = '', showToc = false, fileName }: MarkdownViewerProps) {
   const [tocExpanded, setTocExpanded] = useState(true)
-  
-  const toc = useMemo(() => extractToc(content), [content])
-  const rendered = useMemo(() => markdownToHtml(content), [content])
+
+  const isYaml = useMemo(() => isYamlFile(content, fileName), [content, fileName])
+  const toc = useMemo(() => isYaml ? [] : extractToc(content), [content, isYaml])
+  const rendered = useMemo(() => isYaml ? yamlToHtml(content) : markdownToHtml(content), [content, isYaml])
 
   const scrollToHeading = useCallback((id: string) => {
     const element = document.getElementById(id)
