@@ -485,12 +485,77 @@ export function useDocuments() {
     }
   }, [fetchDocuments, fetchStats])
 
+  const createDocument = useCallback(async (path: string, content: string): Promise<boolean> => {
+    try {
+      const res = await apiRequest('/documents', {
+        method: 'POST',
+        body: { path, content },
+      })
+      if (!res.error) {
+        await fetchDocuments()
+        await fetchStats()
+      }
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [fetchDocuments, fetchStats])
+
+  const updateDocument = useCallback(async (id: string, content: string): Promise<boolean> => {
+    try {
+      const res = await apiRequest(`/documents/${id}`, {
+        method: 'PUT',
+        body: { content },
+      })
+      if (!res.error) {
+        await fetchDocuments()
+      }
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [fetchDocuments])
+
+  const deleteDocument = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const res = await apiRequest(`/documents/${id}`, {
+        method: 'DELETE',
+      })
+      if (!res.error) {
+        await fetchDocuments()
+        await fetchStats()
+      }
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [fetchDocuments, fetchStats])
+
+  const moveDocument = useCallback(async (id: string, newPath: string): Promise<boolean> => {
+    try {
+      const res = await apiRequest(`/documents/${id}/move`, {
+        method: 'POST',
+        body: { new_path: newPath },
+      })
+      if (!res.error) {
+        await fetchDocuments()
+      }
+      return !res.error
+    } catch {
+      return false
+    }
+  }, [fetchDocuments])
+
   useEffect(() => {
     fetchDocuments()
     fetchStats()
   }, [fetchDocuments, fetchStats])
 
-  return { documents, stats, loading, indexing, fetchDocuments, fetchStats, getDocument, getContent, reindex }
+  return {
+    documents, stats, loading, indexing,
+    fetchDocuments, fetchStats, getDocument, getContent, reindex,
+    createDocument, updateDocument, deleteDocument, moveDocument,
+  }
 }
 
 // ============================================
@@ -664,13 +729,12 @@ export interface DocumentTreeNode {
   children?: DocumentTreeNode[]
 }
 
-export function useDocumentTree(root: string = '.', depth: number = 3) {
+export function useDocumentTree(depth: number = 4) {
   const [tree, setTree] = useState<DocumentTreeNode | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchTree = useCallback(async (newRoot?: string, newDepth?: number) => {
-    const targetRoot = newRoot ?? root
+  const fetchTree = useCallback(async (newDepth?: number) => {
     const targetDepth = newDepth ?? depth
 
     setLoading(true)
@@ -678,7 +742,6 @@ export function useDocumentTree(root: string = '.', depth: number = 3) {
 
     try {
       const params = new URLSearchParams({
-        root: targetRoot,
         depth: String(targetDepth),
       })
       const res = await apiRequest(`/documents/tree?${params}`)
@@ -695,7 +758,7 @@ export function useDocumentTree(root: string = '.', depth: number = 3) {
     } finally {
       setLoading(false)
     }
-  }, [root, depth])
+  }, [depth])
 
   useEffect(() => {
     fetchTree()

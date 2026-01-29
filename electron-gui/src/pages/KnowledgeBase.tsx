@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   BookOpen, RefreshCw, Database, Search, X,
   AlertCircle, CheckCircle, ChevronRight, FileText,
-  FolderOpen, Plus, Trash2, Move, Copy
+  Plus
 } from 'lucide-react'
 import clsx from 'clsx'
 import {
@@ -13,7 +13,7 @@ import {
   type KBDocument,
   type KBDocumentDetail,
 } from '../hooks/useKB'
-import { MarkdownViewer } from '../components'
+import { KBDocumentEditor, KBMoveDialog } from '../components'
 
 // KB Sections
 const KB_SECTIONS = [
@@ -27,9 +27,9 @@ const KB_SECTIONS = [
 export default function KnowledgeBase() {
   // Hooks
   const { status, loading: statusLoading, fetchStatus, initialize, rebuildIndex } = useKBStatus()
-  const { toc, loading: tocLoading, getSectionToc, generateToc, fetchToc } = useKBToc()
+  const { toc, loading: tocLoading, getSectionToc, fetchToc } = useKBToc()
   const {
-    documents, loading: docsLoading, total, search,
+    documents, loading: docsLoading, search,
     getDocument, createDocument, updateDocument, deleteDocument, moveDocument,
   } = useKBDocuments()
 
@@ -39,10 +39,12 @@ export default function KnowledgeBase() {
   const [selectedDocument, setSelectedDocument] = useState<KBDocumentDetail | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
-  const [editContent, setEditContent] = useState('')
-  const [saving, setSaving] = useState(false)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+
+  // Editor & dialogs
+  const [isCreatingNew, setIsCreatingNew] = useState(false)
+  const [showMoveDialog, setShowMoveDialog] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   // Load section TOC when section changes
   useEffect(() => {
@@ -85,41 +87,99 @@ export default function KnowledgeBase() {
     if (id) {
       const doc = await getDocument(id)
       setSelectedDocument(doc)
-      setIsEditing(false)
-      setEditContent('')
+      setIsCreatingNew(false)
     }
   }
 
-  // Handle save
-  const handleSave = async () => {
-    if (!selectedDocument) return
-
+  // Handle save (from KBDocumentEditor)
+  const handleSave = async (docData: Partial<KBDocumentDetail>): Promise<boolean> => {
     setSaving(true)
-    const updated = await updateDocument(selectedDocument.id, { content: editContent })
-    setSaving(false)
 
+    if (isCreatingNew) {
+      // Create new document
+      const path = `${selectedSection}/${(docData.title || 'untitled').replace(/\s+/g, '-').toLowerCase()}.md`
+      const content = buildFrontmatter(docData) + '\n\n' + (docData.content || '')
+      const created = await createDocument({ ...docData, path, content })
+      setSaving(false)
+      if (created) {
+        showMessage('success', '문서가 생성되었습니다')
+        setIsCreatingNew(false)
+        loadSectionToc(selectedSection)
+        // Re-fetch to get the created doc
+        search({ section: selectedSection, limit: 100 })
+        return true
+      }
+      showMessage('error', '문서 생성에 실패했습니다')
+      return false
+    }
+
+    if (!selectedDocument) {
+      setSaving(false)
+      return false
+    }
+
+    const updated = await updateDocument(selectedDocument.id, { content: docData.content })
+    setSaving(false)
     if (updated) {
       setSelectedDocument(updated)
-      setIsEditing(false)
       showMessage('success', '저장되었습니다')
-    } else {
-      showMessage('error', '저장에 실패했습니다')
+      loadSectionToc(selectedSection)
+      return true
     }
+    showMessage('error', '저장에 실패했습니다')
+    return false
   }
 
   // Handle delete
-  const handleDelete = async () => {
-    if (!selectedDocument) return
-    if (!confirm('정말 삭제하시겠습니까?')) return
+  const handleDelete = async (): Promise<boolean> => {
+    if (!selectedDocument) return false
 
     const success = await deleteDocument(selectedDocument.id)
     if (success) {
       setSelectedDocument(null)
       showMessage('success', '삭제되었습니다')
       loadSectionToc(selectedSection)
-    } else {
-      showMessage('error', '삭제에 실패했습니다')
+      return true
     }
+    showMessage('error', '삭제에 실패했습니다')
+    return false
+  }
+
+  // Handle move (from KBMoveDialog)
+  const handleMove = async (targetPath: string): Promise<boolean> => {
+    if (!selectedDocument) return false
+
+    const fileName = selectedDocument.path.split('/').pop() || ''
+    const newPath = `${targetPath}/${fileName}`
+    const success = await moveDocument(selectedDocument.id, newPath)
+    if (success) {
+      setSelectedDocument(null)
+      showMessage('success', '이동되었습니다')
+      loadSectionToc(selectedSection)
+      return true
+    }
+    showMessage('error', '이동에 실패했습니다')
+    return false
+  }
+
+  // Handle duplicate
+  const handleDuplicate = async () => {
+    if (!selectedDocument) return
+    const content = selectedDocument.content || ''
+    const newPath = selectedDocument.path.replace(/\.md$/, '-copy.md')
+    const created = await createDocument({ ...selectedDocument, path: newPath, content })
+    if (created) {
+      showMessage('success', '복제되었습니다')
+      loadSectionToc(selectedSection)
+    } else {
+      showMessage('error', '복제에 실패했습니다')
+    }
+  }
+
+  // Handle start creating new document
+  const handleStartCreate = () => {
+    setSelectedDocument(null)
+    setIsCreatingNew(true)
   }
 
   // Handle initialize
@@ -141,6 +201,19 @@ export default function KnowledgeBase() {
     } else {
       showMessage('error', '인덱스 재구축에 실패했습니다')
     }
+  }
+
+  // Build frontmatter from doc data
+  const buildFrontmatter = (data: Partial<KBDocumentDetail>) => {
+    const lines = ['---']
+    if (data.type) lines.push(`type: ${data.type}`)
+    if (data.title) lines.push(`title: "${data.title}"`)
+    if (data.status) lines.push(`status: ${data.status}`)
+    if (data.tags && data.tags.length > 0) lines.push(`tags: [${data.tags.join(', ')}]`)
+    if (data.summary) lines.push(`summary: "${data.summary}"`)
+    lines.push(`created: "${new Date().toISOString().slice(0, 10)}"`)
+    lines.push('---')
+    return lines.join('\n')
   }
 
   // Render TOC tree recursively
@@ -213,7 +286,7 @@ export default function KnowledgeBase() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative">
       {/* Header */}
       <div className="p-4 border-b border-dark-700">
         <div className="flex items-center justify-between">
@@ -233,6 +306,13 @@ export default function KnowledgeBase() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleStartCreate}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded-lg text-sm"
+            >
+              <Plus size={14} />
+              새 문서
+            </button>
             <button
               onClick={handleRebuildIndex}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm"
@@ -364,91 +444,27 @@ export default function KnowledgeBase() {
 
         {/* Right column: Document viewer/editor */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {selectedDocument ? (
-            <>
-              {/* Document header */}
-              <div className="p-4 border-b border-dark-700">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <h2 className="text-lg font-semibold truncate">{selectedDocument.title}</h2>
-                    <div className="text-xs text-dark-400 mt-1 truncate">{selectedDocument.path}</div>
-                    {selectedDocument.tags && selectedDocument.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {selectedDocument.tags.map(tag => (
-                          <span
-                            key={tag}
-                            className="px-1.5 py-0.5 bg-primary-600/20 text-primary-400 rounded text-xs"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 ml-4">
-                    {isEditing ? (
-                      <>
-                        <button
-                          onClick={() => setIsEditing(false)}
-                          className="px-3 py-1.5 text-sm text-dark-400 hover:text-dark-200"
-                        >
-                          취소
-                        </button>
-                        <button
-                          onClick={handleSave}
-                          disabled={saving}
-                          className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:bg-dark-600 rounded text-sm"
-                        >
-                          {saving ? '저장 중...' : '저장'}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            setIsEditing(true)
-                            setEditContent(selectedDocument.content || '')
-                          }}
-                          className="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 rounded text-sm"
-                        >
-                          편집
-                        </button>
-                        <button
-                          onClick={handleDelete}
-                          className="p-1.5 text-dark-400 hover:text-red-400"
-                          title="삭제"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => setSelectedDocument(null)}
-                          className="p-1.5 text-dark-400 hover:text-dark-200"
-                        >
-                          <X size={16} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Document content */}
-              <div className="flex-1 overflow-auto p-4">
-                {isEditing ? (
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    className="w-full h-full p-4 bg-dark-800 border border-dark-600 rounded-lg resize-none focus:border-primary-500 focus:outline-none font-mono text-sm"
-                    placeholder="마크다운 내용을 입력하세요..."
-                  />
-                ) : (
-                  <div className="bg-dark-800 rounded-lg p-4 h-full overflow-auto">
-                    <MarkdownViewer content={selectedDocument.content || ''} />
-                  </div>
-                )}
-              </div>
-            </>
+          {isCreatingNew ? (
+            <KBDocumentEditor
+              document={null}
+              isNew={true}
+              onSave={handleSave}
+              onDelete={async () => false}
+              onMove={() => {}}
+              onDuplicate={() => {}}
+              onClose={() => setIsCreatingNew(false)}
+              saving={saving}
+            />
+          ) : selectedDocument ? (
+            <KBDocumentEditor
+              document={selectedDocument}
+              onSave={handleSave}
+              onDelete={handleDelete}
+              onMove={() => setShowMoveDialog(true)}
+              onDuplicate={handleDuplicate}
+              onClose={() => setSelectedDocument(null)}
+              saving={saving}
+            />
           ) : (
             <div className="flex-1 flex items-center justify-center text-dark-400">
               <div className="text-center">
@@ -460,6 +476,17 @@ export default function KnowledgeBase() {
           )}
         </div>
       </div>
+
+      {/* Move dialog */}
+      {showMoveDialog && selectedDocument && (
+        <KBMoveDialog
+          documentTitle={selectedDocument.title}
+          currentPath={selectedDocument.path}
+          sections={toc}
+          onMove={handleMove}
+          onClose={() => setShowMoveDialog(false)}
+        />
+      )}
     </div>
   )
 }
