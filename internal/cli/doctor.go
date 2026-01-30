@@ -166,8 +166,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// 5. 프로젝트 확인 (현재 디렉토리)
 	projectRoot := config.FindProjectRoot()
-	cwd, _ := os.Getwd()
-	if projectRoot != cwd {
+	claudeDir := filepath.Join(projectRoot, config.ProjectDirName)
+	if _, err := os.Stat(claudeDir); err == nil {
+		// .claude 디렉토리가 존재하면 프로젝트로 인식
 		settingsPath := config.ProjectSettingsPath(projectRoot)
 		if _, err := os.Stat(settingsPath); err == nil {
 			checks = append(checks, CheckResult{

@@ -34,6 +34,10 @@ func (s *Server) RegisterKBRoutes(mux *http.ServeMux) {
 
 	// Sections
 	mux.HandleFunc("/api/v2/kb/sections", s.withCORS(s.handleKBSections))
+
+	// Register (project → KB, external → KB)
+	mux.HandleFunc("/api/v2/kb/register", s.withCORS(s.handleKBRegister))
+	mux.HandleFunc("/api/v2/kb/register/external", s.withCORS(s.handleKBRegisterExternal))
 }
 
 // getVaultPath returns the vault path from config or default
@@ -724,4 +728,90 @@ func (s *Server) handleKBSections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.jsonResponse(w, sections)
+}
+
+// ========================================
+// Register Handlers
+// ========================================
+
+func (s *Server) handleKBRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != "POST" {
+		s.errorResponse(w, 405, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		SourcePath    string `json:"source_path"`
+		TargetSection string `json:"target_section"`
+		TargetPath    string `json:"target_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.errorResponse(w, 400, "Invalid request body")
+		return
+	}
+
+	if req.SourcePath == "" {
+		s.errorResponse(w, 400, "source_path required")
+		return
+	}
+	if req.TargetSection == "" {
+		req.TargetSection = kb.ProjectsDir
+	}
+
+	vaultPath := s.getVaultPath()
+	registerSvc := kb.NewRegisterService(vaultPath, s.config.ProjectRoot)
+
+	result, err := registerSvc.RegisterFromProject(req.SourcePath, req.TargetSection, req.TargetPath)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, result)
+}
+
+func (s *Server) handleKBRegisterExternal(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != "POST" {
+		s.errorResponse(w, 405, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Title         string   `json:"title"`
+		Content       string   `json:"content"`
+		TargetSection string   `json:"target_section"`
+		Type          string   `json:"type"`
+		Tags          []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.errorResponse(w, 400, "Invalid request body")
+		return
+	}
+
+	if req.Title == "" {
+		s.errorResponse(w, 400, "title required")
+		return
+	}
+	if req.TargetSection == "" {
+		req.TargetSection = kb.ReferencesDir
+	}
+
+	vaultPath := s.getVaultPath()
+	registerSvc := kb.NewRegisterService(vaultPath, s.config.ProjectRoot)
+
+	result, err := registerSvc.RegisterExternal(req.Title, req.Content, req.TargetSection, req.Type, req.Tags)
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, result)
 }

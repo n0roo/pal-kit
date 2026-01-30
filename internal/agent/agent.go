@@ -60,11 +60,20 @@ func (s *Service) Load() error {
 		}
 
 		if d.IsDir() {
+			// skills/ 디렉토리는 에이전트가 아닌 도메인 스킬 문서이므로 스킵
+			if d.Name() == "skills" {
+				return filepath.SkipDir
+			}
 			return nil // 디렉토리는 계속 탐색
 		}
 
 		name := d.Name()
 		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".md") {
+			return nil
+		}
+
+		// .rules.md 파일은 에이전트가 아닌 조건부 규칙이므로 스킵
+		if strings.HasSuffix(name, ".rules.md") {
 			return nil
 		}
 

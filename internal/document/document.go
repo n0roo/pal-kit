@@ -318,7 +318,7 @@ func (s *Service) estimateTokens(content string) int64 {
 	return int64(len(content) / 4)
 }
 
-// cleanupDeleted removes documents that no longer exist
+// cleanupDeleted removes documents whose files no longer exist on disk
 func (s *Service) cleanupDeleted(existing map[string]bool) (int, error) {
 	rows, err := s.db.Query(`SELECT id, path FROM documents`)
 	if err != nil {
@@ -333,7 +333,14 @@ func (s *Service) cleanupDeleted(existing map[string]bool) (int, error) {
 			continue
 		}
 
-		if !existing[path] {
+		// scanPaths에 포함된 문서는 existing 맵으로 확인
+		if existing[path] {
+			continue
+		}
+
+		// scanPaths 밖의 문서는 실제 파일 존재 여부로 확인
+		absPath := filepath.Join(s.projectRoot, path)
+		if _, err := os.Stat(absPath); os.IsNotExist(err) {
 			toDelete = append(toDelete, id)
 		}
 	}

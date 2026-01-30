@@ -990,57 +990,79 @@ func (s *Server) handleDocumentsV2(w http.ResponseWriter, r *http.Request) {
 
 	docSvc := document.NewService(database, s.config.ProjectRoot)
 
-	// Parse query parameters
-	query := r.URL.Query().Get("q")
-	docType := r.URL.Query().Get("type")
-	domain := r.URL.Query().Get("domain")
-	status := r.URL.Query().Get("status")
-	tag := r.URL.Query().Get("tag")
-	limitStr := r.URL.Query().Get("limit")
-
-	limit := 100
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
+	switch r.Method {
+	case "POST":
+		// Create a new document
+		var body struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
 		}
-	}
-
-	filters := document.SearchFilters{
-		Type:   docType,
-		Domain: domain,
-		Status: status,
-		Tag:    tag,
-		Limit:  limit,
-	}
-
-	docs, err := docSvc.Search(query, filters)
-	if err != nil {
-		s.errorResponse(w, 500, err.Error())
-		return
-	}
-
-	// Convert to DTO
-	result := make([]map[string]interface{}, 0, len(docs))
-	for _, d := range docs {
-		item := map[string]interface{}{
-			"id":         d.ID,
-			"path":       d.Path,
-			"type":       d.Type,
-			"domain":     d.Domain,
-			"status":     d.Status,
-			"priority":   d.Priority,
-			"tokens":     d.Tokens,
-			"tags":       d.Tags,
-			"created_at": d.CreatedAt,
-			"updated_at": d.UpdatedAt,
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			s.errorResponse(w, 400, "Invalid JSON body")
+			return
 		}
-		if d.Summary.Valid {
-			item["summary"] = d.Summary.String
+		if body.Path == "" {
+			s.errorResponse(w, 400, "Path is required")
+			return
 		}
-		result = append(result, item)
-	}
+		if err := docSvc.CreateDocument(body.Path, body.Content); err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		s.jsonResponse(w, map[string]string{"status": "created", "path": body.Path})
 
-	s.jsonResponse(w, result)
+	default:
+		// GET: list/search documents
+		query := r.URL.Query().Get("q")
+		docType := r.URL.Query().Get("type")
+		domain := r.URL.Query().Get("domain")
+		status := r.URL.Query().Get("status")
+		tag := r.URL.Query().Get("tag")
+		limitStr := r.URL.Query().Get("limit")
+
+		limit := 100
+		if limitStr != "" {
+			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+
+		filters := document.SearchFilters{
+			Type:   docType,
+			Domain: domain,
+			Status: status,
+			Tag:    tag,
+			Limit:  limit,
+		}
+
+		docs, err := docSvc.Search(query, filters)
+		if err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+
+		result := make([]map[string]interface{}, 0, len(docs))
+		for _, d := range docs {
+			item := map[string]interface{}{
+				"id":         d.ID,
+				"path":       d.Path,
+				"type":       d.Type,
+				"domain":     d.Domain,
+				"status":     d.Status,
+				"priority":   d.Priority,
+				"tokens":     d.Tokens,
+				"tags":       d.Tags,
+				"created_at": d.CreatedAt,
+				"updated_at": d.UpdatedAt,
+			}
+			if d.Summary.Valid {
+				item["summary"] = d.Summary.String
+			}
+			result = append(result, item)
+		}
+
+		s.jsonResponse(w, result)
+	}
 }
 
 func (s *Server) handleDocumentStats(w http.ResponseWriter, r *http.Request) {
@@ -1109,6 +1131,13 @@ func (s *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for move sub-resource
+	if strings.HasSuffix(id, "/move") {
+		id = strings.TrimSuffix(id, "/move")
+		s.handleDocumentMove(w, r, id)
+		return
+	}
+
 	database, err := s.getDB()
 	if err != nil {
 		s.errorResponse(w, 500, err.Error())
@@ -1117,35 +1146,63 @@ func (s *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) {
 	defer database.Close()
 
 	docSvc := document.NewService(database, s.config.ProjectRoot)
-	doc, err := docSvc.Get(id)
-	if err != nil {
-		s.errorResponse(w, 404, err.Error())
-		return
-	}
 
-	result := map[string]interface{}{
-		"id":         doc.ID,
-		"path":       doc.Path,
-		"type":       doc.Type,
-		"domain":     doc.Domain,
-		"status":     doc.Status,
-		"priority":   doc.Priority,
-		"tokens":     doc.Tokens,
-		"tags":       doc.Tags,
-		"created_at": doc.CreatedAt,
-		"updated_at": doc.UpdatedAt,
-	}
-	if doc.Summary.Valid {
-		result["summary"] = doc.Summary.String
-	}
+	switch r.Method {
+	case "PUT":
+		// Update document content
+		var body struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			s.errorResponse(w, 400, "Invalid JSON body")
+			return
+		}
+		if err := docSvc.UpdateDocument(id, body.Content); err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		s.jsonResponse(w, map[string]string{"status": "updated", "id": id})
 
-	// Get links
-	linksFrom, _ := docSvc.GetLinksFrom(id)
-	linksTo, _ := docSvc.GetLinksTo(id)
-	result["links_from"] = linksFrom
-	result["links_to"] = linksTo
+	case "DELETE":
+		// Delete document
+		if err := docSvc.DeleteDocument(id); err != nil {
+			s.errorResponse(w, 500, err.Error())
+			return
+		}
+		s.jsonResponse(w, map[string]string{"status": "deleted", "id": id})
 
-	s.jsonResponse(w, result)
+	default:
+		// GET: document detail
+		doc, err := docSvc.Get(id)
+		if err != nil {
+			s.errorResponse(w, 404, err.Error())
+			return
+		}
+
+		result := map[string]interface{}{
+			"id":         doc.ID,
+			"path":       doc.Path,
+			"type":       doc.Type,
+			"domain":     doc.Domain,
+			"status":     doc.Status,
+			"priority":   doc.Priority,
+			"tokens":     doc.Tokens,
+			"tags":       doc.Tags,
+			"created_at": doc.CreatedAt,
+			"updated_at": doc.UpdatedAt,
+		}
+		if doc.Summary.Valid {
+			result["summary"] = doc.Summary.String
+		}
+
+		// Get links
+		linksFrom, _ := docSvc.GetLinksFrom(id)
+		linksTo, _ := docSvc.GetLinksTo(id)
+		result["links_from"] = linksFrom
+		result["links_to"] = linksTo
+
+		s.jsonResponse(w, result)
+	}
 }
 
 func (s *Server) handleDocumentContent(w http.ResponseWriter, r *http.Request, id string) {
@@ -1169,6 +1226,40 @@ func (s *Server) handleDocumentContent(w http.ResponseWriter, r *http.Request, i
 	})
 }
 
+func (s *Server) handleDocumentMove(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != "POST" {
+		s.errorResponse(w, 405, "Method not allowed")
+		return
+	}
+
+	var body struct {
+		NewPath string `json:"new_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.errorResponse(w, 400, "Invalid JSON body")
+		return
+	}
+	if body.NewPath == "" {
+		s.errorResponse(w, 400, "new_path is required")
+		return
+	}
+
+	database, err := s.getDB()
+	if err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+	defer database.Close()
+
+	docSvc := document.NewService(database, s.config.ProjectRoot)
+	if err := docSvc.MoveDocument(id, body.NewPath); err != nil {
+		s.errorResponse(w, 500, err.Error())
+		return
+	}
+
+	s.jsonResponse(w, map[string]string{"status": "moved", "id": id, "new_path": body.NewPath})
+}
+
 // DocumentTreeNode represents a node in the document tree
 type DocumentTreeNode struct {
 	Name     string              `json:"name"`
@@ -1179,36 +1270,45 @@ type DocumentTreeNode struct {
 }
 
 func (s *Server) handleDocumentTree(w http.ResponseWriter, r *http.Request) {
-	root := r.URL.Query().Get("root")
-	if root == "" {
-		root = "."
-	}
-
 	depthStr := r.URL.Query().Get("depth")
-	maxDepth := 3
+	maxDepth := 4
 	if depthStr != "" {
 		if d, err := strconv.Atoi(depthStr); err == nil && d > 0 {
 			maxDepth = d
 		}
 	}
 
-	basePath := filepath.Join(s.config.ProjectRoot, root)
-
-	// Check if path exists
-	info, err := os.Stat(basePath)
-	if err != nil {
-		s.errorResponse(w, 404, "Path not found")
-		return
+	// Only scan managed directories
+	managedDirs := []struct {
+		Dir  string
+		Name string
+	}{
+		{"ports", "ports"},
+		{"conventions", "conventions"},
+		{"agents", "agents"},
+		{"docs", "docs"},
+		{filepath.Join(".pal", "sessions"), "sessions"},
+		{filepath.Join(".pal", "decisions"), "decisions"},
 	}
-	if !info.IsDir() {
-		s.errorResponse(w, 400, "Path is not a directory")
-		return
+
+	rootNode := &DocumentTreeNode{
+		Name:     filepath.Base(s.config.ProjectRoot),
+		Path:     ".",
+		Type:     "directory",
+		Children: make([]*DocumentTreeNode, 0),
 	}
 
-	// Build tree
-	tree := s.buildDocumentTree(basePath, root, 0, maxDepth)
+	for _, md := range managedDirs {
+		absPath := filepath.Join(s.config.ProjectRoot, md.Dir)
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			child := s.buildDocumentTree(absPath, md.Dir, 0, maxDepth)
+			if child != nil {
+				rootNode.Children = append(rootNode.Children, child)
+			}
+		}
+	}
 
-	s.jsonResponse(w, tree)
+	s.jsonResponse(w, rootNode)
 }
 
 func (s *Server) buildDocumentTree(absPath, relPath string, depth, maxDepth int) *DocumentTreeNode {
@@ -1230,12 +1330,20 @@ func (s *Server) buildDocumentTree(absPath, relPath string, depth, maxDepth int)
 			if err == nil {
 				for _, entry := range entries {
 					// Skip hidden files/dirs
-					if strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".pal" {
+					if strings.HasPrefix(entry.Name(), ".") {
 						continue
 					}
 
 					childPath := filepath.Join(absPath, entry.Name())
 					childRelPath := filepath.Join(relPath, entry.Name())
+
+					// For files, only include .md, .yaml, .yml
+					if !entry.IsDir() {
+						ext := strings.ToLower(filepath.Ext(entry.Name()))
+						if ext != ".md" && ext != ".yaml" && ext != ".yml" {
+							continue
+						}
+					}
 
 					child := s.buildDocumentTree(childPath, childRelPath, depth+1, maxDepth)
 					if child != nil {
